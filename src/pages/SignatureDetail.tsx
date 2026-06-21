@@ -21,13 +21,11 @@ import {
   TrendingUp,
   ScrollText,
 } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import {
-  signatureRecords,
-  templates,
-  TemplateParagraph,
-} from '@/data/localMock';
+import { useDataStore } from '@/store/dataStore';
+import type { TemplateParagraph } from '@/data/localMock';
 
 type ActionType = 'read' | 'explain' | 'confirm' | 'sign';
 
@@ -52,33 +50,33 @@ function maskIdCard(idCard: string): string {
   return idCard.slice(0, 4) + '**********' + idCard.slice(-4);
 }
 
-function getIdCardAge(idCard: string): number {
-  if (!idCard || idCard.length < 14) return 0;
-  const birthYear = parseInt(idCard.slice(6, 10), 10);
-  const birthMonth = parseInt(idCard.slice(10, 12), 10);
-  const now = new Date();
-  let age = now.getFullYear() - birthYear;
-  if (now.getMonth() + 1 < birthMonth) age--;
-  return age;
-}
-
-function getIdCardGender(idCard: string): string {
-  if (!idCard || idCard.length < 17) return '未知';
-  const genderNum = parseInt(idCard.charAt(16), 10);
-  return genderNum % 2 === 0 ? '女' : '男';
-}
-
 function formatTime(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export default function SignatureDetail() {
-  const signature = signatureRecords[0];
+  const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const getSignatureById = useDataStore(s => s.getSignatureById);
+  const signatures = useDataStore(s => s.signatures);
+  const templates = useDataStore(s => s.templates);
+
+  const signature = useMemo(() => {
+    return getSignatureById(id!) || signatures[0];
+  }, [id, getSignatureById, signatures]);
+
   const [activeParagraphId, setActiveParagraphId] = useState<string | null>(null);
   const template = templates.find((t) => t.id === signature.templateId);
   const version = template?.versions.find((v) => v.id === signature.templateVersionId);
   const paragraphs = version?.paragraphs || [];
+
+  const sigIndex = useMemo(() => {
+    const idx = signatures.findIndex(s => s.id === signature.id);
+    return idx >= 0 ? idx : 0;
+  }, [signatures, signature.id]);
+
+  const hasComplaint = sigIndex % 15 === 0;
 
   const timelineActions: TimelineAction[] = useMemo(() => {
     const actions: TimelineAction[] = [];
@@ -168,7 +166,10 @@ export default function SignatureDetail() {
     <div className="p-6 bg-neutral-50 min-h-screen">
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          <button className="w-9 h-9 rounded-sm border border-neutral-300 bg-white flex items-center justify-center hover:bg-neutral-50 transition-colors">
+          <button
+            onClick={() => navigate(-1)}
+            className="w-9 h-9 rounded-sm border border-neutral-300 bg-white flex items-center justify-center hover:bg-neutral-50 transition-colors"
+          >
             <ArrowLeft size={16} className="text-neutral-600" />
           </button>
           <div>
@@ -178,6 +179,15 @@ export default function SignatureDetail() {
               <span className="font-mono text-neutral-700">{signature.id.toUpperCase()}</span>
               <span className="mx-1">·</span>
               <span>数据来源：/api/signatures/{signature.id}</span>
+              {hasComplaint && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span className="inline-flex items-center text-danger-600">
+                    <AlertTriangle size={12} className="mr-1" />
+                    涉诉标记
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -213,11 +223,11 @@ export default function SignatureDetail() {
             </div>
             <div className="flex items-center justify-between py-1.5 border-b border-neutral-100">
               <span className="text-neutral-500">年龄</span>
-              <span className="text-neutral-700">{getIdCardAge(signature.customerIdCard)} 岁</span>
+              <span className="text-neutral-700">{signature.age} 岁</span>
             </div>
             <div className="flex items-center justify-between py-1.5">
-              <span className="text-neutral-500">性别</span>
-              <span className="text-neutral-700">{getIdCardGender(signature.customerIdCard)}</span>
+              <span className="text-neutral-500">手机号</span>
+              <span className="text-neutral-700">{signature.customerPhone}</span>
             </div>
           </div>
         </div>
@@ -339,9 +349,9 @@ export default function SignatureDetail() {
                       <span className="font-medium text-neutral-800">{maskName(signature.customerName)}</span>
                     </div>
                     <div>
-                      <span className="text-neutral-500">性别/年龄：</span>
+                      <span className="text-neutral-500">年龄：</span>
                       <span className="font-medium text-neutral-800">
-                        {getIdCardGender(signature.customerIdCard)} / {getIdCardAge(signature.customerIdCard)}岁
+                        {signature.age}岁
                       </span>
                     </div>
                     <div className="col-span-2">
@@ -370,7 +380,7 @@ export default function SignatureDetail() {
                       paragraph={paragraph}
                       index={idx}
                       isActive={activeParagraphId === paragraph.id}
-                      onHover={(id) => setActiveParagraphId(id)}
+                      onHover={(pid) => setActiveParagraphId(pid)}
                       onLeave={() => setActiveParagraphId(null)}
                       reading={signature.paragraphReadings.find((r) => r.paragraphId === paragraph.id)}
                     />

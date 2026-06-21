@@ -17,25 +17,10 @@ import {
   ToggleRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import {
-  projects,
-  templates,
-  type Project,
-} from '@/data/localMock';
+import { useDataStore, type ProjectMappingConfig } from '@/store/dataStore';
+import type { Project } from '@/data/localMock';
 
 type PopulationType = 'adult' | 'minor' | 'retreatment' | 'custom';
-
-interface MappingRow {
-  id: string;
-  populationType: PopulationType;
-  populationLabel: string;
-  templateId: string;
-  templateVersionId: string;
-  isDefault: boolean;
-  minAge?: number;
-  maxAge?: number;
-  requiredPriorTreatmentCount?: number;
-}
 
 const populationOptions: { value: PopulationType; label: string }[] = [
   { value: 'adult', label: '成人' },
@@ -108,38 +93,51 @@ function countMappings(node: TreeNode): number {
 }
 
 export default function ProjectMapping() {
-  const tree = useMemo(() => buildTree(projects), []);
+  const projects = useDataStore(s => s.projects);
+  const templates = useDataStore(s => s.templates);
+  const projectMappings = useDataStore(s => s.projectMappings);
+  const saveProjectMappings = useDataStore(s => s.saveProjectMappings);
+
+  const tree = useMemo(() => buildTree(projects), [projects]);
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(tree.map((r) => r.id))
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [mappingRows, setMappingRows] = useState<MappingRow[]>([]);
+  const [mappingRows, setMappingRows] = useState<ProjectMappingConfig[]>([]);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedId) || null,
-    [selectedId]
+    [selectedId, projects]
   );
 
   useEffect(() => {
-    if (selectedProject && selectedProject.level === 3) {
-      const rows: MappingRow[] = selectedProject.mappedTemplateVersions.map(
-        (m, idx) => ({
-          id: `${selectedProject.id}_m_${idx}`,
-          populationType: m.type,
-          populationLabel:
-            populationOptions.find((o) => o.value === (m.type as PopulationType))
-              ?.label || m.type,
-          templateId: m.templateId,
-          templateVersionId: m.versionId,
-          isDefault: idx === 0,
-        })
-      );
-      setMappingRows(rows.length > 0 ? rows : []);
+    if (selectedProject) {
+      const storedMappings = projectMappings[selectedProject.id] || [];
+      if (storedMappings.length > 0) {
+        setMappingRows(storedMappings);
+      } else if (selectedProject.level === 3 && selectedProject.mappedTemplateVersions.length > 0) {
+        const rows: ProjectMappingConfig[] = selectedProject.mappedTemplateVersions.map(
+          (m, idx) => ({
+            id: `${selectedProject.id}_m_${idx}`,
+            populationType: m.type as PopulationType,
+            populationLabel:
+              populationOptions.find((o) => o.value === (m.type as PopulationType))
+                ?.label || m.type,
+            templateId: m.templateId,
+            versionId: m.versionId,
+            version: m.version,
+            isDefault: idx === 0,
+          })
+        );
+        setMappingRows(rows);
+      } else {
+        setMappingRows([]);
+      }
     } else {
       setMappingRows([]);
     }
-  }, [selectedProject]);
+  }, [selectedProject, projectMappings]);
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
@@ -164,6 +162,8 @@ export default function ProjectMapping() {
     const isSelected = selectedId === node.id;
     const Icon = categoryIcons[node.categoryId] || Syringe;
     const mapCount = node.level === 3 ? countMappings(node) : 0;
+    const storedCount = projectMappings[node.id]?.length || 0;
+    const displayCount = Math.max(mapCount, storedCount);
 
     return (
       <div key={node.id}>
@@ -207,9 +207,9 @@ export default function ProjectMapping() {
 
           <span className="flex-1 truncate">{node.name}</span>
 
-          {level === 3 && mapCount > 0 && (
+          {level === 3 && displayCount > 0 && (
             <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[10px] font-medium rounded-full bg-primary-100 text-primary-600 flex-shrink-0">
-              {mapCount}
+              {displayCount}
             </span>
           )}
         </div>
@@ -224,18 +224,19 @@ export default function ProjectMapping() {
   };
 
   const addMappingRow = () => {
-    const newRow: MappingRow = {
-      id: `new_${Date.now()}`,
+    const newRow: ProjectMappingConfig = {
+      id: `pm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       populationType: 'adult',
       populationLabel: '成人',
       templateId: templates[0]?.id || '',
-      templateVersionId: templates[0]?.versions[0]?.id || '',
+      versionId: templates[0]?.versions[0]?.id || '',
+      version: templates[0]?.versions[0]?.version || '',
       isDefault: mappingRows.length === 0,
     };
     setMappingRows([...mappingRows, newRow]);
   };
 
-  const updateRow = (id: string, updates: Partial<MappingRow>) => {
+  const updateRow = (id: string, updates: Partial<ProjectMappingConfig>) => {
     setMappingRows((prev) =>
       prev.map((r) => {
         if (r.id !== id) return r;
@@ -245,13 +246,27 @@ export default function ProjectMapping() {
             populationOptions.find((o) => o.value === updates.populationType)
               ?.label || updates.populationType;
         }
+        if (updates.templateId) {
+          const t = templates.find(x => x.id === updates.templateId);
+          const v = t?.versions[0];
+          if (v) {
+            updated.versionId = v.id;
+            updated.version = v.version;
+          }
+        }
         return updated;
       })
     );
   };
 
   const deleteRow = (id: string) => {
-    setMappingRows((prev) => prev.filter((r) => r.id !== id));
+    setMappingRows((prev) => {
+      const remaining = prev.filter((r) => r.id !== id);
+      if (remaining.length > 0 && !remaining.some(r => r.isDefault)) {
+        remaining[0].isDefault = true;
+      }
+      return remaining;
+    });
   };
 
   const setDefaultRow = (id: string) => {
@@ -261,7 +276,8 @@ export default function ProjectMapping() {
   };
 
   const handleSave = () => {
-    console.log('Saving mappings for project:', selectedProject?.id, mappingRows);
+    if (!selectedProject || mappingRows.length === 0) return;
+    saveProjectMappings(selectedProject.id, mappingRows);
     alert('配置已保存');
   };
 
@@ -308,7 +324,7 @@ export default function ProjectMapping() {
 
         {/* Right Panel - Config */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {!selectedProject || selectedProject.level !== 3 ? (
+          {!selectedProject ? (
             <div className="flex-1 flex items-center justify-center text-neutral-400">
               <div className="text-center">
                 <FileText size={48} className="mx-auto mb-4 opacity-30" />
@@ -416,13 +432,8 @@ export default function ProjectMapping() {
                                 <select
                                   value={row.templateId}
                                   onChange={(e) => {
-                                    const templateId = e.target.value;
-                                    const versions =
-                                      getTemplateVersions(templateId);
                                     updateRow(row.id, {
-                                      templateId,
-                                      templateVersionId:
-                                        versions[0]?.id || '',
+                                      templateId: e.target.value,
                                     });
                                   }}
                                   className="w-full px-2 py-1.5 text-sm border border-neutral-200 rounded-sm focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-100 bg-white"
@@ -437,12 +448,15 @@ export default function ProjectMapping() {
                               </td>
                               <td className="px-4 py-3">
                                 <select
-                                  value={row.templateVersionId}
-                                  onChange={(e) =>
+                                  value={row.versionId}
+                                  onChange={(e) => {
+                                    const t = templates.find(x => x.id === row.templateId);
+                                    const v = t?.versions.find(v => v.id === e.target.value);
                                     updateRow(row.id, {
-                                      templateVersionId: e.target.value,
-                                    })
-                                  }
+                                      versionId: e.target.value,
+                                      version: v?.version || '',
+                                    });
+                                  }}
                                   className="w-full px-2 py-1.5 text-sm border border-neutral-200 rounded-sm focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-100 bg-white"
                                 >
                                   <option value="">选择版本</option>
@@ -496,10 +510,10 @@ export default function ProjectMapping() {
                                   </span>
                                   <input
                                     type="number"
-                                    value={row.requiredPriorTreatmentCount ?? ''}
+                                    value={row.priorTreatmentCount ?? ''}
                                     onChange={(e) =>
                                       updateRow(row.id, {
-                                        requiredPriorTreatmentCount: e.target
+                                        priorTreatmentCount: e.target
                                           .value
                                           ? Number(e.target.value)
                                           : undefined,

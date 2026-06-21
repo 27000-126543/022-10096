@@ -11,15 +11,14 @@ import {
   Clock,
   Info,
 } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import {
-  reviewRecords,
-  templates,
-  type ReviewRecord,
   type TemplateParagraph,
 } from '@/data/localMock';
 import StatusBadge from '@/components/ui/StatusBadge';
 import CategoryTag from '@/components/ui/CategoryTag';
+import { useDataStore } from '@/store/dataStore';
 
 type DiffType = 'added' | 'removed' | 'modified' | 'unchanged';
 
@@ -135,13 +134,20 @@ const lineClass: Record<DiffType, string> = {
 };
 
 export default function ReviewDetail() {
-  const record: ReviewRecord = reviewRecords[0];
-  const template = templates.find((t) => t.id === record.templateId)!;
-  const newVersion = template.versions.find((v) => v.id === record.versionId);
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const reviews = useDataStore(s => s.reviews);
+  const templates = useDataStore(s => s.templates);
+  const processReview = useDataStore(s => s.processReview);
+
+  const review = reviews.find(r => r.id === id) || reviews[0];
+  const template = templates.find(t => t.id === review?.templateId);
+  const newVersion = template?.versions.find(v => v.id === review?.versionId);
   const oldVersion =
-    template.versions.filter((v) => v.isPublished)[0] ||
-    template.versions[template.versions.length - 2] ||
-    template.versions[0];
+    template?.versions.filter((v) => v.isPublished)[0] ||
+    (template && template.versions.length >= 2
+      ? template.versions[template.versions.indexOf(newVersion!) - 1]
+      : null);
 
   const paragraphDiffs = useMemo(
     () => computeParagraphDiffs(oldVersion?.paragraphs || [], newVersion?.paragraphs || []),
@@ -157,10 +163,16 @@ export default function ReviewDetail() {
   const [leftWidth, setLeftWidth] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [reviewComment, setReviewComment] = useState('');
-  const [selectedRisks, setSelectedRisks] = useState<Set<string>>(new Set());
+  const [opinionText, setOpinionText] = useState(review?.opinion || '');
 
   const activeParagraph = paragraphDiffs.find((p) => p.paragraphId === activeTab);
+  const isPending = review?.status === 'pending';
+
+  useEffect(() => {
+    if (!isPending && review?.opinion) {
+      setOpinionText(review.opinion);
+    }
+  }, [review, isPending]);
 
   const handleMouseDown = useCallback(() => {
     setIsDragging(true);
@@ -197,30 +209,26 @@ export default function ReviewDetail() {
     };
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
-  const toggleRisk = (id: string) => {
-    setSelectedRisks((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const handleApprove = () => {
-    console.log('Approve:', record.id, reviewComment, selectedRisks);
-    alert('已通过审核');
+    if (!id) return;
+    processReview(id, 'approved', 'u002', '王建国', opinionText);
+    navigate('/reviews');
   };
 
   const handleReject = () => {
-    console.log('Reject:', record.id, reviewComment);
-    alert('已驳回');
+    if (!id) return;
+    processReview(id, 'rejected', 'u002', '王建国', opinionText);
+    navigate('/reviews');
   };
 
-  const renderLines = (lines: LineDiff[], isOld: boolean) => (
-    <div className="space-y-1.5 text-sm text-neutral-700 leading-relaxed">
+  const renderLines = (lines: LineDiff[], isOld: boolean, isRisk: boolean) => (
+    <div className={cn(
+      'space-y-1.5 text-sm text-neutral-700 leading-relaxed',
+      isRisk && 'border-l-4 border-warning-400 pl-3 ml-1'
+    )}>
       {lines.length === 0 ? (
         <div className="text-neutral-400 italic py-4 text-center text-xs">
-          {isOld ? '此段落为新增内容，旧版本不存在' : '此段落已删除，新版本不存在'}
+          {isOld ? '（初始版本）' : '此段落已删除，新版本不存在'}
         </div>
       ) : (
         lines.map((line, idx) => (
@@ -250,26 +258,37 @@ export default function ReviewDetail() {
     </div>
   );
 
+  if (!review || !template) {
+    return (
+      <div className="h-full flex items-center justify-center bg-neutral-50">
+        <p className="text-neutral-500">审核记录不存在</p>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col bg-neutral-50">
       {/* Header */}
       <div className="px-6 py-4 bg-white border-b border-neutral-200">
         <div className="flex items-center gap-2 text-xs text-neutral-500 mb-3">
-          <button className="inline-flex items-center gap-1 text-primary-600 hover:text-primary-700">
+          <button
+            onClick={() => navigate('/reviews')}
+            className="inline-flex items-center gap-1 text-primary-600 hover:text-primary-700"
+          >
             <ChevronLeft size={14} />
             返回审核列表
           </button>
           <span>/</span>
           <span>版本审核</span>
           <span>/</span>
-          <span className="text-neutral-700">{template.name}</span>
+          <span className="text-neutral-700">{review.templateName}</span>
         </div>
 
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-lg font-semibold text-primary-800">
-                {template.name}
+                {review.templateName}
               </h1>
               <CategoryTag
                 category={
@@ -280,14 +299,10 @@ export default function ReviewDetail() {
                 size="md"
               />
               <span className="inline-flex items-center px-2.5 py-1 text-xs font-mono font-medium rounded-sm bg-primary-50 text-primary-600 border border-primary-100">
-                版本 v{record.version}
+                版本 v{review.version}
               </span>
               <StatusBadge
-                status={
-                  record.status === 'pending'
-                    ? 'reviewing'
-                    : (record.status as Parameters<typeof StatusBadge>[0]['status'])
-                }
+                status={review.status}
                 size="md"
               />
             </div>
@@ -295,7 +310,7 @@ export default function ReviewDetail() {
             <div className="flex items-center gap-6 mt-3 text-xs text-neutral-500">
               <div className="flex items-center gap-1.5">
                 <FileText size={12} />
-                <span>变更说明：{record.changeSummary}</span>
+                <span>变更说明：{review.changeSummary}</span>
               </div>
             </div>
           </div>
@@ -304,33 +319,33 @@ export default function ReviewDetail() {
         <div className="flex items-center gap-6 mt-4 pt-4 border-t border-neutral-100 text-xs">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 text-[11px] font-medium">
-              {record.submitterName.slice(0, 1)}
+              {review.submitterName.slice(0, 1)}
             </div>
             <div>
               <div className="text-neutral-700 font-medium">
-                提交人：{record.submitterName}
+                提交人：{review.submitterName}
               </div>
               <div className="flex items-center gap-1 text-neutral-400 mt-0.5">
                 <Calendar size={10} />
-                {formatDate(record.submitTime)}
+                {formatDate(review.submitTime)}
               </div>
             </div>
           </div>
 
-          {record.reviewerName && (
+          {review.reviewerName && (
             <>
               <div className="w-px h-8 bg-neutral-200" />
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full bg-success-100 flex items-center justify-center text-success-600 text-[11px] font-medium">
-                  {record.reviewerName.slice(0, 1)}
+                  {review.reviewerName.slice(0, 1)}
                 </div>
                 <div>
                   <div className="text-neutral-700 font-medium">
-                    审核人：{record.reviewerName}
+                    审核人：{review.reviewerName}
                   </div>
                   <div className="flex items-center gap-1 text-neutral-400 mt-0.5">
                     <Clock size={10} />
-                    {record.reviewTime ? formatDate(record.reviewTime) : '-'}
+                    {review.reviewTime ? formatDate(review.reviewTime) : '-'}
                   </div>
                 </div>
               </div>
@@ -391,7 +406,7 @@ export default function ReviewDetail() {
                 旧版本
               </span>
               <span className="text-xs text-neutral-400 font-mono">
-                v{oldVersion?.version || '-'}
+                {oldVersion ? `v${oldVersion.version}` : '-'}
               </span>
             </div>
             {activeParagraph && (
@@ -407,7 +422,7 @@ export default function ReviewDetail() {
           </div>
 
           <div className="flex-1 p-5 opacity-70">
-            {activeParagraph && renderLines(activeParagraph.oldLines, true)}
+            {activeParagraph && renderLines(activeParagraph.oldLines, true, activeParagraph.isRiskHighlight)}
           </div>
         </div>
 
@@ -441,7 +456,7 @@ export default function ReviewDetail() {
                 新版本
               </span>
               <span className="text-xs text-primary-500 font-mono">
-                v{newVersion?.version || record.version}
+                v{newVersion?.version || review.version}
               </span>
             </div>
             <div className="flex items-center gap-3 text-[10px]">
@@ -461,7 +476,7 @@ export default function ReviewDetail() {
           </div>
 
           <div className="flex-1 p-5">
-            {activeParagraph && renderLines(activeParagraph.newLines, false)}
+            {activeParagraph && renderLines(activeParagraph.newLines, false, activeParagraph.isRiskHighlight)}
           </div>
         </div>
       </div>
@@ -473,14 +488,18 @@ export default function ReviewDetail() {
           <div className="flex-1">
             <label className="flex items-center gap-1.5 text-xs font-medium text-neutral-700 mb-2">
               <Info size={12} className="text-neutral-400" />
-              审核意见
+              {isPending ? '审核意见' : '审核意见（该审核已处理）'}
             </label>
             <textarea
-              value={reviewComment}
-              onChange={(e) => setReviewComment(e.target.value)}
+              value={opinionText}
+              onChange={(e) => isPending && setOpinionText(e.target.value)}
+              disabled={!isPending}
               rows={4}
               placeholder="请输入审核意见，驳回时需说明修改原因..."
-              className="w-full px-4 py-3 text-sm border border-neutral-200 rounded-sm focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-100 resize-none"
+              className={cn(
+                'w-full px-4 py-3 text-sm border border-neutral-200 rounded-sm focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-100 resize-none',
+                !isPending && 'bg-neutral-50 text-neutral-500 cursor-not-allowed'
+              )}
             />
           </div>
 
@@ -493,17 +512,11 @@ export default function ReviewDetail() {
               </label>
               <div className="p-3 bg-warning-50 border border-warning-100 rounded-sm space-y-2 max-h-[120px] overflow-y-auto">
                 {riskParagraphs.map((p) => (
-                  <label
+                  <div
                     key={p.paragraphId}
-                    className="flex items-start gap-2 cursor-pointer group"
+                    className="flex items-start gap-2"
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedRisks.has(p.paragraphId)}
-                      onChange={() => toggleRisk(p.paragraphId)}
-                      className="mt-0.5 w-3.5 h-3.5 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    <span className="text-xs text-neutral-600 leading-snug group-hover:text-neutral-800">
+                    <span className="text-xs text-neutral-600 leading-snug">
                       {p.title}
                       {p.hasChanges && (
                         <span className="ml-1 text-warning-600 font-medium">
@@ -511,38 +524,44 @@ export default function ReviewDetail() {
                         </span>
                       )}
                     </span>
-                  </label>
+                  </div>
                 ))}
               </div>
-              {selectedRisks.size > 0 && (
-                <p className="text-[10px] text-warning-600 mt-1.5">
-                  已勾选 {selectedRisks.size} 项需重点关注
-                </p>
-              )}
             </div>
           )}
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center justify-end gap-3 mt-5 pt-4 border-t border-neutral-100">
-          <button className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-sm hover:bg-neutral-100 transition-colors">
-            <User size={14} />
-            转办审核
-          </button>
-          <button
-            onClick={handleReject}
-            className="inline-flex items-center gap-1.5 px-6 py-2 text-sm font-medium text-white bg-danger-500 rounded-sm hover:bg-danger-600 transition-colors shadow-sm"
-          >
-            <XCircle size={15} />
-            驳回
-          </button>
-          <button
-            onClick={handleApprove}
-            className="inline-flex items-center gap-1.5 px-6 py-2 text-sm font-medium text-white bg-success-500 rounded-sm hover:bg-success-600 transition-colors shadow-sm"
-          >
-            <CheckCircle2 size={15} />
-            通过
-          </button>
+          {!isPending ? (
+            <span className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-neutral-500 bg-neutral-50 border border-neutral-200 rounded-sm">
+              {review.decision === 'approved' ? '该审核已通过' : '该审核已驳回'}
+            </span>
+          ) : (
+            <>
+              <button
+                onClick={() => navigate('/reviews')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-sm hover:bg-neutral-100 transition-colors"
+              >
+                <User size={14} />
+                取消
+              </button>
+              <button
+                onClick={handleReject}
+                className="inline-flex items-center gap-1.5 px-6 py-2 text-sm font-medium text-white bg-danger-500 rounded-sm hover:bg-danger-600 transition-colors shadow-sm"
+              >
+                <XCircle size={15} />
+                驳回
+              </button>
+              <button
+                onClick={handleApprove}
+                className="inline-flex items-center gap-1.5 px-6 py-2 text-sm font-medium text-white bg-success-500 rounded-sm hover:bg-success-600 transition-colors shadow-sm"
+              >
+                <CheckCircle2 size={15} />
+                通过
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

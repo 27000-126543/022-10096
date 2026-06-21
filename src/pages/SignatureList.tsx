@@ -15,15 +15,12 @@ import {
   Clock,
   Tag,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { DataTable } from '@/components/ui/DataTable';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import {
-  signatureRecords,
-  stores,
-  projects,
-  SignatureRecord,
-} from '@/data/localMock';
+import { useDataStore } from '@/store/dataStore';
+import type { SignatureRecord, Project } from '@/data/localMock';
 
 function maskName(name: string): string {
   if (!name || name.length <= 1) return name;
@@ -37,6 +34,11 @@ function maskIdCard(idCard: string): string {
 }
 
 export default function SignatureList() {
+  const navigate = useNavigate();
+  const signatures = useDataStore(s => s.signatures);
+  const stores = useDataStore(s => s.stores);
+  const projects = useDataStore(s => s.projects) as Project[];
+
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedStores, setSelectedStores] = useState<string[]>([]);
@@ -56,10 +58,14 @@ export default function SignatureList() {
       }
     });
     return Array.from(cats.entries()).map(([id, name]) => ({ id, name }));
-  }, []);
+  }, [projects]);
+
+  const hasComplaint = (index: number): boolean => {
+    return index % 15 === 0;
+  };
 
   const filteredData = useMemo(() => {
-    let result = [...signatureRecords];
+    let result = [...signatures];
 
     if (startDate) {
       const start = new Date(startDate).getTime();
@@ -123,6 +129,7 @@ export default function SignatureList() {
 
     return result;
   }, [
+    signatures,
     startDate,
     endDate,
     selectedStores,
@@ -154,7 +161,7 @@ export default function SignatureList() {
     const total = filteredData.length;
     const normal = filteredData.filter((r) => r.status === 'normal').length;
     const resigned = filteredData.filter((r) => r.status === 'resigned').length;
-    const complaints = filteredData.reduce((sum) => sum + (Math.random() < 0.03 ? 1 : 0), 0);
+    const complaints = filteredData.reduce((sum, _, idx) => sum + (hasComplaint(idx) ? 1 : 0), 0);
     const avgTime = total > 0
       ? Math.round(filteredData.reduce((sum, r) => sum + r.totalReadingTime, 0) / total)
       : 0;
@@ -316,9 +323,8 @@ export default function SignatureList() {
       title: '客诉标记',
       width: '80px',
       align: 'center' as const,
-      render: () => {
-        const hasComplaint = Math.random() < 0.03;
-        return hasComplaint ? (
+      render: (_row: SignatureRecord, index: number) => {
+        return hasComplaint(index) ? (
           <div className="flex items-center justify-center">
             <div
               className="w-7 h-7 rounded-full bg-danger-100 flex items-center justify-center group relative cursor-help"
@@ -339,9 +345,12 @@ export default function SignatureList() {
       title: '操作',
       width: '100px',
       align: 'center' as const,
-      render: () => (
+      render: (row: SignatureRecord) => (
         <div className="flex items-center justify-center">
-          <button className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-white bg-primary-500 hover:bg-primary-600 rounded-sm transition-colors shadow-sm">
+          <button
+            onClick={() => navigate(`/signatures/${row.id}`)}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-white bg-primary-500 hover:bg-primary-600 rounded-sm transition-colors shadow-sm"
+          >
             <Eye size={12} />
             详情
           </button>

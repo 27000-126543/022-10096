@@ -14,14 +14,15 @@ import {
   X,
   ArrowUpDown,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import {
-  reviewRecords,
-  templates,
   type ReviewRecord,
   type TemplateCategory,
 } from '@/data/localMock';
 import CategoryTag from '@/components/ui/CategoryTag';
+import StatusBadge from '@/components/ui/StatusBadge';
+import { useDataStore } from '@/store/dataStore';
 
 type TabType = 'pending' | 'approved' | 'rejected';
 
@@ -67,6 +68,11 @@ function formatDate(dateStr: string) {
 }
 
 export default function ReviewList() {
+  const navigate = useNavigate();
+  const reviews = useDataStore(s => s.reviews);
+  const templates = useDataStore(s => s.templates);
+  const processReview = useDataStore(s => s.processReview);
+
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [submitterFilter, setSubmitterFilter] = useState('all');
@@ -80,19 +86,19 @@ export default function ReviewList() {
 
   const counts = useMemo(() => {
     return {
-      pending: reviewRecords.filter((r) => r.status === 'pending').length,
-      approved: reviewRecords.filter((r) => r.status === 'approved').length,
-      rejected: reviewRecords.filter((r) => r.status === 'rejected').length,
+      pending: reviews.filter((r) => r.status === 'pending').length,
+      approved: reviews.filter((r) => r.status === 'approved').length,
+      rejected: reviews.filter((r) => r.status === 'rejected').length,
     };
-  }, []);
+  }, [reviews]);
 
   const submitters = useMemo(() => {
-    const set = new Set<string>(reviewRecords.map((r) => r.submitterName));
+    const set = new Set<string>(reviews.map((r) => r.submitterName));
     return Array.from(set);
-  }, []);
+  }, [reviews]);
 
   const filteredRecords = useMemo(() => {
-    return reviewRecords.filter((r) => {
+    return reviews.filter((r) => {
       if (r.status !== activeTab) return false;
 
       if (searchQuery) {
@@ -127,7 +133,7 @@ export default function ReviewList() {
 
       return true;
     });
-  }, [activeTab, searchQuery, submitterFilter, categoryFilter, startDate, endDate]);
+  }, [activeTab, searchQuery, submitterFilter, categoryFilter, startDate, endDate, reviews, templates]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
   const paginatedRecords = filteredRecords.slice(
@@ -136,15 +142,15 @@ export default function ReviewList() {
   );
 
   const handleViewDetail = (record: ReviewRecord) => {
-    console.log('View detail:', record.id);
+    navigate(`/reviews/${record.id}`);
   };
 
   const handleQuickApprove = (record: ReviewRecord) => {
-    console.log('Quick approve:', record.id);
+    processReview(record.id, 'approved', 'u002', '王建国', '审核通过，内容合规');
   };
 
   const handleReject = (record: ReviewRecord) => {
-    console.log('Reject:', record.id);
+    processReview(record.id, 'rejected', 'u002', '王建国', '风险条款描述不够清晰，请补充');
   };
 
   return (
@@ -325,7 +331,6 @@ export default function ReviewList() {
           <div className="space-y-4">
             {paginatedRecords.map((record) => {
               const template = templates.find((t) => t.id === record.templateId);
-              const config = tabConfig[activeTab];
 
               return (
                 <div
@@ -375,15 +380,7 @@ export default function ReviewList() {
                       </div>
                     </div>
 
-                    <span
-                      className={cn(
-                        'inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-sm border',
-                        config.activeColor
-                      )}
-                    >
-                      <config.icon size={12} />
-                      {config.label}
-                    </span>
+                    <StatusBadge status={record.status} size="sm" />
                   </div>
 
                   {/* Change Summary */}
@@ -419,7 +416,7 @@ export default function ReviewList() {
                       查看详情
                     </button>
 
-                    {activeTab === 'pending' && (
+                    {record.status === 'pending' && (
                       <>
                         <button
                           onClick={() => handleQuickApprove(record)}

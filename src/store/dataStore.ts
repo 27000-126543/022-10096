@@ -1,210 +1,275 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import {
-  Template,
-  TemplateVersion,
-  MedicalProject,
-  ProjectTemplateMapping,
-  ReviewRecord,
-  Store,
-  DeployRecord,
-  SignatureRecord,
-  RiskStats,
-  TemplateCategory,
-  TemplateStatus,
-  PagedData,
-} from '../../shared/types';
+  type User,
+  type Template,
+  type TemplateParagraph,
+  type TemplateVersion,
+  type Project,
+  type ReviewRecord,
+  type Store,
+  type DeployRecord,
+  type SignatureRecord,
+  type RiskTermStats,
+  type ReSignStats,
+  type ComplaintAssociation,
+  type AnalyticsSummary,
+  users as initUsers,
+  templates as initTemplates,
+  projects as initProjects,
+  reviewRecords as initReviews,
+  stores as initStores,
+  deployRecords as initDeploys,
+  signatureRecords as initSignatures,
+  riskTermStats as initRiskTermStats,
+  resignStats as initResignStats,
+  complaintAssociations as initComplaintAssociations,
+  analyticsSummary as initAnalyticsSummary,
+} from '@/data/localMock';
 
-interface LoadingState {
-  templates: boolean;
-  templateVersions: boolean;
-  projects: boolean;
-  mappings: boolean;
-  reviews: boolean;
-  stores: boolean;
-  deploys: boolean;
-  signatures: boolean;
-  analytics: boolean;
-}
-
-interface Filters {
-  templateCategory?: TemplateCategory;
-  templateStatus?: TemplateStatus;
-  searchKeyword?: string;
-  reviewStatus?: 'pending' | 'approved' | 'rejected';
-  storeRegion?: string;
-  dateRange?: { start: string; end: string };
-  page: number;
-  pageSize: number;
-}
+export type ProjectMappingConfig = {
+  id: string;
+  populationType: 'adult' | 'minor' | 'retreatment' | 'custom';
+  populationLabel: string;
+  templateId: string;
+  versionId: string;
+  version: string;
+  isDefault: boolean;
+  minAge?: number;
+  maxAge?: number;
+  priorTreatmentCount?: number;
+};
 
 interface DataState {
+  users: User[];
   templates: Template[];
-  templateVersions: Record<string, TemplateVersion[]>;
-  selectedTemplate: Template | null;
-  selectedVersion: TemplateVersion | null;
-
-  projects: MedicalProject[];
-  projectMappings: Record<string, ProjectTemplateMapping[]>;
-
+  projects: Project[];
+  projectMappings: Record<string, ProjectMappingConfig[]>;
   reviews: ReviewRecord[];
-  selectedReview: ReviewRecord | null;
-
   stores: Store[];
   deploys: DeployRecord[];
+  signatures: SignatureRecord[];
+  riskTermStats: RiskTermStats[];
+  resignStats: ReSignStats[];
+  complaintAssociations: ComplaintAssociation[];
+  analyticsSummary: AnalyticsSummary;
 
-  signatures: PagedData<SignatureRecord>;
-  selectedSignature: SignatureRecord | null;
+  saveTemplateDraft: (templateId: string, versionId: string, updates: {
+    name?: string;
+    paragraphs?: TemplateParagraph[];
+    changeLog?: string;
+  }) => void;
 
-  riskStats: RiskStats | null;
+  submitTemplateForReview: (
+    templateId: string,
+    versionId: string,
+    submitterId: string,
+    submitterName: string,
+    changeSummary: string
+  ) => ReviewRecord | null;
 
-  loading: LoadingState;
-  filters: Filters;
-  error: string | null;
+  processReview: (
+    reviewId: string,
+    decision: 'approved' | 'rejected',
+    reviewerId: string,
+    reviewerName: string,
+    opinion: string
+  ) => void;
 
-  setTemplates: (templates: Template[]) => void;
-  addTemplate: (template: Template) => void;
-  updateTemplate: (template: Template) => void;
-  setSelectedTemplate: (template: Template | null) => void;
-  setTemplateVersions: (templateId: string, versions: TemplateVersion[]) => void;
-  addTemplateVersion: (templateId: string, version: TemplateVersion) => void;
-  setSelectedVersion: (version: TemplateVersion | null) => void;
+  saveProjectMappings: (projectId: string, mappings: ProjectMappingConfig[]) => void;
 
-  setProjects: (projects: MedicalProject[]) => void;
-  setProjectMappings: (projectId: string, mappings: ProjectTemplateMapping[]) => void;
-  updateProjectMapping: (projectId: string, mapping: ProjectTemplateMapping) => void;
+  createDeployRecord: (deploy: Omit<DeployRecord, 'id' | 'deployedAt'>) => void;
 
-  setReviews: (reviews: ReviewRecord[]) => void;
-  addReview: (review: ReviewRecord) => void;
-  updateReview: (review: ReviewRecord) => void;
-  setSelectedReview: (review: ReviewRecord | null) => void;
+  withdrawDeploy: (deployId: string) => void;
 
-  setStores: (stores: Store[]) => void;
-  setDeploys: (deploys: DeployRecord[]) => void;
-  addDeploy: (deploy: DeployRecord) => void;
-  updateDeploy: (deploy: DeployRecord) => void;
+  getSignatureById: (id: string) => SignatureRecord | undefined;
 
-  setSignatures: (signatures: PagedData<SignatureRecord>) => void;
-  setSelectedSignature: (signature: SignatureRecord | null) => void;
-
-  setRiskStats: (stats: RiskStats | null) => void;
-
-  setLoading: (key: keyof LoadingState, value: boolean) => void;
-  setError: (error: string | null) => void;
-  setFilters: (filters: Partial<Filters>) => void;
-  resetFilters: () => void;
+  resetToInitial: () => void;
 }
 
-const initialLoading: LoadingState = {
-  templates: false,
-  templateVersions: false,
-  projects: false,
-  mappings: false,
-  reviews: false,
-  stores: false,
-  deploys: false,
-  signatures: false,
-  analytics: false,
-};
+const generateId = (prefix: string) =>
+  `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-const initialFilters: Filters = {
-  page: 1,
-  pageSize: 20,
-};
-
-export const useDataStore = create<DataState>((set) => ({
-  templates: [],
-  templateVersions: {},
-  selectedTemplate: null,
-  selectedVersion: null,
-
-  projects: [],
-  projectMappings: {},
-
-  reviews: [],
-  selectedReview: null,
-
-  stores: [],
-  deploys: [],
-
-  signatures: {
-    items: [],
-    total: 0,
-    page: 1,
-    pageSize: 20,
-  },
-  selectedSignature: null,
-
-  riskStats: null,
-
-  loading: initialLoading,
-  filters: initialFilters,
-  error: null,
-
-  setTemplates: (templates) => set({ templates }),
-  addTemplate: (template) =>
-    set((state) => ({ templates: [template, ...state.templates] })),
-  updateTemplate: (template) =>
-    set((state) => ({
-      templates: state.templates.map((t) => (t.id === template.id ? template : t)),
-    })),
-  setSelectedTemplate: (template) => set({ selectedTemplate: template }),
-  setTemplateVersions: (templateId, versions) =>
-    set((state) => ({
-      templateVersions: { ...state.templateVersions, [templateId]: versions },
-    })),
-  addTemplateVersion: (templateId, version) =>
-    set((state) => ({
-      templateVersions: {
-        ...state.templateVersions,
-        [templateId]: [version, ...(state.templateVersions[templateId] || [])],
+const initProjectMappings: Record<string, ProjectMappingConfig[]> = {};
+const seedProjectsForMapping = initProjects.filter(p => p.level === 2 || (p.level === 1 && !initProjects.some(c => c.parentId === p.id)));
+seedProjectsForMapping.slice(0, 10).forEach(p => {
+  const tpl = initTemplates.find(t => t.category === p.categoryId);
+  if (tpl) {
+    const publishedVersion = tpl.versions.find(v => v.isPublished) || tpl.versions[0];
+    initProjectMappings[p.id] = [
+      {
+        id: generateId('pm'),
+        populationType: 'adult',
+        populationLabel: '成人版',
+        templateId: tpl.id,
+        versionId: publishedVersion.id,
+        version: publishedVersion.version,
+        isDefault: true,
+        minAge: 18,
+        maxAge: 65,
       },
-    })),
-  setSelectedVersion: (version) => set({ selectedVersion: version }),
+    ];
+  }
+});
 
-  setProjects: (projects) => set({ projects }),
-  setProjectMappings: (projectId, mappings) =>
-    set((state) => ({
-      projectMappings: { ...state.projectMappings, [projectId]: mappings },
-    })),
-  updateProjectMapping: (projectId, mapping) =>
-    set((state) => {
-      const existing = state.projectMappings[projectId] || [];
-      const idx = existing.findIndex((m) => m.id === mapping.id);
-      const updated = idx >= 0
-        ? existing.map((m) => (m.id === mapping.id ? mapping : m))
-        : [...existing, mapping];
-      return {
-        projectMappings: { ...state.projectMappings, [projectId]: updated },
-      };
+export const useDataStore = create<DataState>()(
+  persist(
+    (set, get) => ({
+      users: initUsers,
+      templates: JSON.parse(JSON.stringify(initTemplates)),
+      projects: initProjects,
+      projectMappings: initProjectMappings,
+      reviews: JSON.parse(JSON.stringify(initReviews)),
+      stores: initStores,
+      deploys: JSON.parse(JSON.stringify(initDeploys)),
+      signatures: JSON.parse(JSON.stringify(initSignatures)),
+      riskTermStats: initRiskTermStats,
+      resignStats: initResignStats,
+      complaintAssociations: initComplaintAssociations,
+      analyticsSummary: initAnalyticsSummary,
+
+      saveTemplateDraft: (templateId, versionId, updates) => {
+        set(state => {
+          const newTemplates = state.templates.map(t => {
+            if (t.id !== templateId) return t;
+            const newVersions = t.versions.map(v => {
+              if (v.id !== versionId) return v;
+              return {
+                ...v,
+                paragraphs: updates.paragraphs ?? v.paragraphs,
+                changeLog: updates.changeLog ?? v.changeLog,
+              };
+            });
+            return {
+              ...t,
+              name: updates.name ?? t.name,
+              versions: newVersions,
+              updatedAt: new Date().toISOString(),
+            };
+          });
+          return { templates: newTemplates };
+        });
+      },
+
+      submitTemplateForReview: (templateId, versionId, submitterId, submitterName, changeSummary) => {
+        const template = get().templates.find(t => t.id === templateId);
+        const version = template?.versions.find(v => v.id === versionId);
+        if (!template || !version) return null;
+
+        const review: ReviewRecord = {
+          id: generateId('review'),
+          templateId,
+          templateName: template.name,
+          versionId,
+          version: version.version,
+          submitterId,
+          submitterName,
+          submitTime: new Date().toISOString(),
+          reviewerId: null,
+          reviewerName: null,
+          reviewTime: null,
+          status: 'pending',
+          decision: null,
+          opinion: null,
+          changeSummary,
+        };
+
+        set(state => ({
+          reviews: [review, ...state.reviews],
+          templates: state.templates.map(t =>
+            t.id === templateId ? { ...t, status: 'pending', updatedAt: new Date().toISOString() } : t
+          ),
+        }));
+
+        return review;
+      },
+
+      processReview: (reviewId, decision, reviewerId, reviewerName, opinion) => {
+        const review = get().reviews.find(r => r.id === reviewId);
+        if (!review || review.status !== 'pending') return;
+
+        const now = new Date().toISOString();
+        const templateStatus: Template['status'] = decision === 'approved' ? 'approved' : 'rejected';
+
+        set(state => ({
+          reviews: state.reviews.map(r =>
+            r.id === reviewId
+              ? { ...r, status: decision, decision, reviewerId, reviewerName, reviewTime: now, opinion }
+              : r
+          ),
+          templates: state.templates.map(t =>
+            t.id === review.templateId ? { ...t, status: templateStatus, updatedAt: now } : t
+          ),
+        }));
+      },
+
+      saveProjectMappings: (projectId, mappings) => {
+        const validMappings = mappings.map((m, idx) => ({
+          ...m,
+          isDefault: idx === 0 ? true : m.isDefault,
+        }));
+        const hasDefault = validMappings.some(m => m.isDefault);
+        if (!hasDefault && validMappings.length > 0) {
+          validMappings[0].isDefault = true;
+        }
+        let foundDefault = false;
+        const finalMappings = validMappings.map(m => {
+          if (m.isDefault && !foundDefault) {
+            foundDefault = true;
+            return m;
+          }
+          return { ...m, isDefault: false };
+        });
+        set(state => ({
+          projectMappings: { ...state.projectMappings, [projectId]: finalMappings },
+        }));
+      },
+
+      createDeployRecord: (deploy) => {
+        const newDeploy: DeployRecord = {
+          ...deploy,
+          id: generateId('deploy'),
+          deployedAt: new Date().toISOString(),
+        };
+        set(state => ({
+          deploys: [newDeploy, ...state.deploys],
+        }));
+      },
+
+      withdrawDeploy: (deployId) => {
+        set(state => ({
+          deploys: state.deploys.map(d =>
+            d.id === deployId
+              ? { ...d, status: 'withdrawn' as const, withdrawnAt: new Date().toISOString() }
+              : d
+          ),
+        }));
+      },
+
+      getSignatureById: (id) => {
+        return get().signatures.find(s => s.id === id);
+      },
+
+      resetToInitial: () => {
+        set({
+          templates: JSON.parse(JSON.stringify(initTemplates)),
+          reviews: JSON.parse(JSON.stringify(initReviews)),
+          deploys: JSON.parse(JSON.stringify(initDeploys)),
+          signatures: JSON.parse(JSON.stringify(initSignatures)),
+          projectMappings: initProjectMappings,
+        });
+      },
     }),
-
-  setReviews: (reviews) => set({ reviews }),
-  addReview: (review) =>
-    set((state) => ({ reviews: [review, ...state.reviews] })),
-  updateReview: (review) =>
-    set((state) => ({
-      reviews: state.reviews.map((r) => (r.id === review.id ? review : r)),
-    })),
-  setSelectedReview: (review) => set({ selectedReview: review }),
-
-  setStores: (stores) => set({ stores }),
-  setDeploys: (deploys) => set({ deploys }),
-  addDeploy: (deploy) =>
-    set((state) => ({ deploys: [deploy, ...state.deploys] })),
-  updateDeploy: (deploy) =>
-    set((state) => ({
-      deploys: state.deploys.map((d) => (d.id === deploy.id ? deploy : d)),
-    })),
-
-  setSignatures: (signatures) => set({ signatures }),
-  setSelectedSignature: (signature) => set({ selectedSignature: signature }),
-
-  setRiskStats: (stats) => set({ riskStats: stats }),
-
-  setLoading: (key, value) =>
-    set((state) => ({ loading: { ...state.loading, [key]: value } })),
-  setError: (error) => set({ error }),
-  setFilters: (filters) =>
-    set((state) => ({ filters: { ...state.filters, ...filters } })),
-  resetFilters: () => set({ filters: initialFilters }),
-}));
+    {
+      name: 'medical-compliance-store',
+      partialize: state => ({
+        templates: state.templates,
+        projectMappings: state.projectMappings,
+        reviews: state.reviews,
+        deploys: state.deploys,
+        signatures: state.signatures,
+      }),
+      version: 1,
+    }
+  )
+);

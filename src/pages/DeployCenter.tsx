@@ -21,14 +21,8 @@ import {
 import { cn } from '@/lib/utils';
 import { DataTable } from '@/components/ui/DataTable';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import {
-  templates,
-  stores,
-  deployRecords,
-  Template,
-  Region,
-  DeployRecord,
-} from '@/data/localMock';
+import { useDataStore } from '@/store/dataStore';
+import type { Template, Region, DeployRecord } from '@/data/localMock';
 
 type TabType = 'new' | 'records';
 
@@ -54,8 +48,9 @@ const categoryColorMap: Record<string, string> = {
 
 export default function DeployCenter() {
   const [activeTab, setActiveTab] = useState<TabType>('new');
+  const deploys = useDataStore(s => s.deploys);
 
-  const activeCount = deployRecords.filter((d) => d.status === 'active').length;
+  const activeCount = deploys.filter((d) => d.status === 'active').length;
 
   return (
     <div className="p-6 bg-neutral-50 min-h-screen">
@@ -105,14 +100,18 @@ export default function DeployCenter() {
           </button>
         </div>
 
-        {activeTab === 'new' ? <NewDeployTab /> : <DeployRecordsTab />}
+        {activeTab === 'new' ? <NewDeployTab onSuccess={() => setActiveTab('records')} /> : <DeployRecordsTab />}
       </div>
     </div>
   );
 }
 
-function NewDeployTab() {
-  const publishedTemplates = templates.filter((t) => t.status === 'published');
+function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
+  const templates = useDataStore(s => s.templates);
+  const stores = useDataStore(s => s.stores);
+  const createDeployRecord = useDataStore(s => s.createDeployRecord);
+
+  const publishedTemplates = templates.filter((t) => t.status === 'approved');
 
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(publishedTemplates[0] || null);
   const [templateSearch, setTemplateSearch] = useState('');
@@ -145,7 +144,7 @@ function NewDeployTab() {
       counts[r.key] = stores.filter((s) => s.region === r.key && s.isActive).length;
     });
     return counts;
-  }, []);
+  }, [stores]);
 
   const citiesInSelectedRegions = useMemo(() => {
     const cities = new Set<string>();
@@ -153,7 +152,7 @@ function NewDeployTab() {
       .filter((s) => selectedRegions.has(s.region) && s.isActive)
       .forEach((s) => cities.add(s.city));
     return Array.from(cities);
-  }, [selectedRegions]);
+  }, [selectedRegions, stores]);
 
   const storesInSelectedCities = useMemo(() => {
     return stores.filter(
@@ -162,7 +161,7 @@ function NewDeployTab() {
           (selectedRegions.has(s.region) && selectedCities.size === 0)) &&
         s.isActive
     );
-  }, [selectedCities, selectedRegions]);
+  }, [selectedCities, selectedRegions, stores]);
 
   const previewStats = useMemo(() => {
     const effectiveStores = selectedStores.size > 0 ? selectedStores : new Set(storesInSelectedCities.map((s) => s.id));
@@ -172,8 +171,9 @@ function NewDeployTab() {
     return {
       stores: effectiveStores.size,
       cities: citiesCount,
+      effectiveStoreIds: Array.from(effectiveStores),
     };
-  }, [selectedStores, storesInSelectedCities]);
+  }, [selectedStores, storesInSelectedCities, stores]);
 
   const toggleRegion = (region: Region) => {
     const newRegions = new Set(selectedRegions);
@@ -226,6 +226,40 @@ function NewDeployTab() {
 
   const clearAllStores = () => {
     setSelectedStores(new Set());
+  };
+
+  const handleConfirmDeploy = () => {
+    if (!selectedTemplate || previewStats.stores === 0) return;
+
+    const version = selectedTemplate.versions.find(v => v.id === selectedTemplate.currentVersionId) || selectedTemplate.versions[0];
+    if (!version) return;
+
+    const effectiveStoreIds = previewStats.effectiveStoreIds;
+    const deployStores = stores.filter(s => effectiveStoreIds.includes(s.id));
+    const deployRegions = Array.from(selectedRegions);
+
+    const scheduledAt = !isImmediate && scheduledDate && scheduledTime
+      ? new Date(`${scheduledDate}T${scheduledTime}`).toISOString()
+      : null;
+
+    createDeployRecord({
+      templateId: selectedTemplate.id,
+      templateName: selectedTemplate.name,
+      versionId: version.id,
+      version: version.version,
+      region: deployRegions,
+      storeIds: effectiveStoreIds,
+      storeNames: deployStores.map(s => s.name),
+      status: isImmediate ? 'active' : 'scheduled',
+      deployType: isImmediate ? 'immediate' : 'scheduled',
+      scheduledAt,
+      withdrawnAt: null,
+      deployedBy: 'u002',
+      deployNote: versionNote,
+    });
+
+    alert('发布成功！');
+    onSuccess();
   };
 
   return (
@@ -333,7 +367,7 @@ function NewDeployTab() {
                     </span>
                   </div>
                 </div>
-                <StatusBadge status="published" label="已发布" />
+                <StatusBadge status="approved" label="已审核" />
               </div>
             </div>
           )}
@@ -702,10 +736,11 @@ function NewDeployTab() {
             </span>
           </button>
           <button
-            disabled={!selectedTemplate || previewStats.stores === 0}
+            onClick={handleConfirmDeploy}
+            disabled={!selectedTemplate || previewStats.stores === 0 || (!isImmediate && (!scheduledDate || !scheduledTime))}
             className={cn(
               'px-6 py-2.5 text-sm font-medium rounded-sm transition-all shadow-md',
-              !selectedTemplate || previewStats.stores === 0
+              (!selectedTemplate || previewStats.stores === 0 || (!isImmediate && (!scheduledDate || !scheduledTime)))
                 ? 'bg-neutral-300 text-neutral-500 cursor-not-allowed'
                 : 'bg-white text-primary-700 hover:bg-primary-50'
             )}
@@ -722,17 +757,27 @@ function NewDeployTab() {
 }
 
 function DeployRecordsTab() {
+  const deploys = useDataStore(s => s.deploys);
+  const stores = useDataStore(s => s.stores);
+  const withdrawDeploy = useDataStore(s => s.withdrawDeploy);
+
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [storeFilter, setStoreFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<string>('all');
 
   const filteredRecords = useMemo(() => {
-    return deployRecords.filter((record) => {
+    return deploys.filter((record) => {
       if (statusFilter !== 'all' && record.status !== statusFilter) return false;
       if (storeFilter !== 'all' && !record.storeIds.includes(storeFilter)) return false;
       return true;
     });
-  }, [statusFilter, storeFilter]);
+  }, [statusFilter, storeFilter, deploys]);
+
+  const handleWithdraw = (deployId: string) => {
+    if (confirm('确定要撤下此发布吗？')) {
+      withdrawDeploy(deployId);
+    }
+  };
 
   const columns = [
     {
@@ -865,8 +910,11 @@ function DeployRecordsTab() {
             <Eye size={12} />
             详情
           </button>
-          {row.status === 'active' && (
-            <button className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-danger-600 hover:text-danger-700 hover:bg-danger-50 border border-danger-200 rounded-sm transition-colors">
+          {(row.status === 'active' || row.status === 'scheduled') && (
+            <button
+              onClick={() => handleWithdraw(row.id)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-danger-600 hover:text-danger-700 hover:bg-danger-50 border border-danger-200 rounded-sm transition-colors"
+            >
               <Undo2 size={12} />
               撤下
             </button>
@@ -942,7 +990,7 @@ function DeployRecordsTab() {
             </div>
           </div>
           <div className="text-2xl font-bold text-success-700 mt-2">
-            {deployRecords.filter((d) => d.status === 'active').length}
+            {deploys.filter((d) => d.status === 'active').length}
           </div>
         </div>
         <div className="p-4 bg-white border border-warning-200 rounded-sm bg-gradient-to-br from-warning-50/50 to-white">
@@ -953,7 +1001,7 @@ function DeployRecordsTab() {
             </div>
           </div>
           <div className="text-2xl font-bold text-warning-700 mt-2">
-            {deployRecords.filter((d) => d.status === 'scheduled').length}
+            {deploys.filter((d) => d.status === 'scheduled').length}
           </div>
         </div>
         <div className="p-4 bg-white border border-neutral-200 rounded-sm bg-gradient-to-br from-neutral-50/50 to-white">
@@ -964,7 +1012,7 @@ function DeployRecordsTab() {
             </div>
           </div>
           <div className="text-2xl font-bold text-neutral-700 mt-2">
-            {deployRecords.filter((d) => d.status === 'withdrawn').length}
+            {deploys.filter((d) => d.status === 'withdrawn').length}
           </div>
         </div>
         <div className="p-4 bg-white border border-primary-200 rounded-sm bg-gradient-to-br from-primary-50/50 to-white">

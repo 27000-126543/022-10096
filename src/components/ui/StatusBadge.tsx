@@ -42,9 +42,9 @@ const statusConfig: Record<
     dotClassName: 'bg-primary-500',
   },
   pending: {
-    label: '待处理',
+    label: '审核中',
     className: 'bg-warning-50 text-warning-700 border-warning-200',
-    dotClassName: 'bg-warning-500',
+    dotClassName: 'bg-warning-500 animate-pulse-soft',
   },
   active: {
     label: '生效中',

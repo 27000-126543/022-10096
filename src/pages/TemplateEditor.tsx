@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import {
   AlertTriangle,
   Trash2,
@@ -13,9 +13,12 @@ import {
   Clock,
   Sparkles,
 } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { CategoryTag, type CategoryType } from '@/components/ui/CategoryTag';
-import { StatusBadge } from '@/components/ui/StatusBadge';
+import { StatusBadge, type StatusType } from '@/components/ui/StatusBadge';
+import { useDataStore } from '@/store/dataStore';
+import { users, type Template, type TemplateVersion, type TemplateParagraph } from '@/data/localMock';
 
 const sectionTypes = [
   { key: 'introduction', label: '项目介绍', icon: '📋' },
@@ -45,100 +48,84 @@ interface TemplateSection {
   isRiskHighlight: boolean;
 }
 
-const initialSections: TemplateSection[] = [
-  {
-    id: 's1',
-    type: 'introduction',
-    title: '一、项目介绍',
-    content: '本项目为玻尿酸注射美容治疗，通过将医用透明质酸钠凝胶注入皮肤真皮层或皮下组织，以达到填充凹陷、改善轮廓、增加皮肤弹性及保湿的效果。\n\n本治疗采用经国家药品监督管理局批准的正规玻尿酸产品，由具备资质的专业医师操作。治疗前医师将根据您的面部特征、皮肤状况及个人需求，制定个性化方案。',
-    order: 1,
-    isRiskHighlight: false,
-  },
-  {
-    id: 's2',
-    type: 'contraindication',
-    title: '二、禁忌症',
-    content: '存在以下情况者，不适合接受本项治疗：\n\n1. 对玻尿酸产品或其任何成分（如利多卡因等）有过敏史者；\n2. 注射部位存在皮肤感染、活动性炎症或开放性伤口者；\n3. 患有严重基础疾病（如心脏病、肝病、肾病、血液病等）且病情不稳定者；\n4. 孕妇、哺乳期妇女及计划近期怀孕者；\n5. 未满18周岁的未成年人（需监护人签署同意）；\n6. 正在服用抗凝药物或有凝血功能障碍者；\n7. 有瘢痕疙瘩病史或异常瘢痕增生倾向者；\n8. 对治疗效果有不切实际期望或存在心理障碍者。',
-    order: 2,
-    isRiskHighlight: false,
-  },
-  {
-    id: 's3',
-    type: 'risk',
-    title: '三、风险与并发症',
-    content: '尽管玻尿酸注射是相对安全的微创美容治疗，但仍可能发生以下风险和并发症：\n\n【常见反应（发生率约5-15%）】\n• 注射部位红肿、瘀青、胀痛，通常3-7天自行消退\n• 局部瘙痒、紧绷感或异物感\n• 注射部位不对称或轻微不平整\n\n【少见并发症（发生率约1-5%）】\n• 持续2周以上的肿胀或硬结\n• 色素沉着或色素减退\n• 肉芽肿形成（迟发性异物反应）\n• 血管压迫导致的局部组织缺血\n\n【严重罕见风险（发生率＜0.1%）】\n⚠️ 血管栓塞：若不慎注入血管，可能导致皮肤坏死、失明甚至危及生命\n⚠️ 严重过敏反应或过敏性休克\n⚠️ 感染导致脓肿形成\n\n出现上述任何异常情况，请立即联系您的治疗医师或前往医院就诊。',
-    order: 3,
-    isRiskHighlight: true,
-  },
-  {
-    id: 's4',
-    type: 'alternative',
-    title: '四、替代方案',
-    content: '除玻尿酸注射外，根据您的具体需求，还可考虑以下替代治疗方案：\n\n1. 自体脂肪填充：抽取自身脂肪处理后注射，效果持久但需手术操作，恢复时间较长；\n2. 胶原蛋白注射：动物源或人源胶原蛋白，效果自然但维持时间较短；\n3. 肉毒素注射：适用于动力性皱纹改善，对于静态凹陷效果有限；\n4. 线雕提升：通过可吸收线材进行提拉，适合中重度松弛者；\n5. 光电治疗：如热玛吉、超声刀等，通过刺激胶原增生实现紧致效果；\n6. 手术整形：对于严重老化或结构性问题，可考虑手术方案。\n\n以上方案各有优缺点，请与医师充分沟通后选择最适合您的治疗方式。',
-    order: 4,
-    isRiskHighlight: false,
-  },
-  {
-    id: 's5',
-    type: 'preoperative',
-    title: '五、术前注意事项',
-    content: '治疗前请您配合做好以下准备：\n\n1. 治疗前1周内避免服用阿司匹林、维生素E、鱼油等可能增加出血风险的药物；\n2. 治疗前1周避免剧烈运动、饮酒及熬夜；\n3. 治疗当日请勿化妆，保持面部清洁；\n4. 如有既往病史、手术史、过敏史，请提前告知医师；\n5. 女性请避开月经期进行治疗；\n6. 治疗前建议拍照存档，以便术后对比效果；\n7. 请确保在身体状态良好、无发热感冒的情况下接受治疗。',
-    order: 5,
-    isRiskHighlight: false,
-  },
-  {
-    id: 's6',
-    type: 'postoperative',
-    title: '六、术后护理指导',
-    content: '治疗后请严格遵照以下护理要求：\n\n【术后24小时内】\n• 注射部位避免沾水、避免按摩或挤压\n• 避免剧烈运动及高温环境（桑拿、温泉等）\n• 避免化妆及使用刺激性护肤品\n• 保持注射部位清洁干燥\n\n【术后1周内】\n• 可进行轻柔冷敷缓解肿胀\n• 避免食用辛辣刺激性食物、海鲜及烟酒\n• 避免长时间阳光暴晒\n• 遵医嘱使用修复类护肤品\n\n【术后1个月内】\n• 定期复查，如有异常及时就诊\n• 避免接受其他面部有创治疗\n• 保持规律作息，避免过度劳累\n\n恢复过程中如有任何疑问，请及时与您的医师联系。',
-    order: 6,
-    isRiskHighlight: false,
-  },
-  {
-    id: 's7',
-    type: 'cost',
-    title: '七、费用说明',
-    content: '本次治疗费用明细如下：\n\n■ 玻尿酸产品费用：¥ ________ （品牌：______ 型号：______ 规格：______ml）\n■ 医师诊疗操作费：¥ ________\n■ 术前检查及麻醉费用：¥ ________\n■ 术后护理产品费用：¥ ________\n\n费用合计：¥ ________（大写：人民币 ________ 元整）\n\n【退费说明】\n• 治疗前因个人原因取消，扣除已发生费用后退还剩余款项；\n• 治疗进行中因个人原因终止，已注入的产品费用不予退还；\n• 术后如出现因产品质量或操作不当导致的并发症，院方承担相应处理费用；\n• 因个人护理不当导致的不良后果，后续修复费用由个人承担。\n\n本价格为本次治疗约定价格，不包含后续追加治疗或修复费用。',
-    order: 7,
-    isRiskHighlight: false,
-  },
-  {
-    id: 's8',
-    type: 'dispute',
-    title: '八、争议处理约定',
-    content: '医患双方在治疗及后续过程中如发生争议，按以下方式处理：\n\n1. 友好协商：双方首先通过友好沟通协商解决，力求达成一致意见；\n2. 调解途径：协商不成时，可申请医疗纠纷人民调解委员会进行调解；\n3. 技术鉴定：需要时可委托医学会或司法鉴定机构进行医疗损害鉴定；\n4. 法律诉讼：仍无法达成一致时，任何一方均可向有管辖权的人民法院提起诉讼。\n\n双方确认：\n• 本院已就治疗方案、风险及替代方案向患者进行了充分告知和解释；\n• 患者已阅读并理解本知情同意书全部内容，各项疑问已得到满意答复；\n• 患者系在完全自愿、意识清醒、无任何外力胁迫的情况下签署本同意书；\n• 本同意书一式两份，医患双方各执一份，具有同等法律效力。',
-    order: 8,
-    isRiskHighlight: false,
-  },
-];
+function mapParagraphToSection(p: TemplateParagraph): TemplateSection {
+  let type: string = p.type;
+  if (p.type === 'intro') type = 'introduction';
+  if (p.type === 'postcare') type = 'postoperative';
+  return {
+    id: p.id,
+    type,
+    title: p.title,
+    content: p.content,
+    order: p.order,
+    isRiskHighlight: p.isRiskHighlight,
+  };
+}
+
+function mapSectionToParagraph(s: TemplateSection): TemplateParagraph {
+  let type: TemplateParagraph['type'] = 'custom';
+  if (s.type === 'introduction') type = 'intro';
+  else if (s.type === 'postoperative') type = 'postcare';
+  else if (s.type === 'contraindication') type = 'contraindication';
+  else if (s.type === 'alternative') type = 'alternative';
+  else if (s.type === 'dispute') type = 'dispute';
+  else type = 'custom';
+  return {
+    id: s.id,
+    title: s.title,
+    order: s.order,
+    type,
+    content: s.content,
+    isRiskHighlight: s.isRiskHighlight,
+  };
+}
+
+function mapStoreStatusToBadge(status: Template['status']): StatusType {
+  if (status === 'pending') return 'reviewing';
+  return status;
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export default function TemplateEditor() {
-  const [templateName, setTemplateName] = useState('玻尿酸注射知情同意书');
-  const [category, setCategory] = useState<CategoryType>('injection');
-  const [sections, setSections] = useState<TemplateSection[]>(initialSections);
-  const [selectedSectionId, setSelectedSectionId] = useState(initialSections[0].id);
-  const [version, setVersion] = useState('V1.0.3');
-  const [changeNote, setChangeNote] = useState('优化风险提示段落表述，补充最新临床数据依据');
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
+  const templates = useDataStore((s) => s.templates);
+  const saveTemplateDraft = useDataStore((s) => s.saveTemplateDraft);
+  const submitTemplateForReview = useDataStore((s) => s.submitTemplateForReview);
+
+  const template = useMemo(() => {
+    if (id && id !== 'new') {
+      const found = templates.find((t) => t.id === id);
+      if (found) return found;
+    }
+    return templates[0];
+  }, [templates, id]);
+
+  const currentVersion: TemplateVersion | undefined = useMemo(() => {
+    if (!template) return undefined;
+    const draftVersion = template.versions.find((v) => !v.isPublished);
+    if (draftVersion) return draftVersion;
+    return template.versions[template.versions.length - 1];
+  }, [template]);
+
+  const [templateName, setTemplateName] = useState(template?.name || '');
+  const [category, setCategory] = useState<CategoryType>((template?.category as CategoryType) || 'injection');
+  const [sections, setSections] = useState<TemplateSection[]>(
+    currentVersion?.paragraphs.map(mapParagraphToSection) || []
+  );
+  const [selectedSectionId, setSelectedSectionId] = useState<string>(
+    currentVersion?.paragraphs[0]?.id || ''
+  );
+  const [version, setVersion] = useState(currentVersion ? `V${currentVersion.version}` : 'V1.0.0');
+  const [changeNote, setChangeNote] = useState(currentVersion?.changeLog || '');
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  const id = 't001';
-
-  useEffect(() => {
-    const fetchTemplate = async () => {
-      try {
-        const res = await fetch(`/api/templates/${id}`);
-        const result = await res.json();
-        if (result.success && result.data) {
-          setTemplateName(result.data.name);
-          if (result.data.category) setCategory(result.data.category);
-        }
-      } catch {
-        // use default state
-      }
-    };
-    fetchTemplate();
-  }, [id]);
 
   const handleAddSection = (type: string) => {
     const typeConfig = sectionTypes.find((t) => t.key === type);
@@ -192,46 +179,53 @@ export default function TemplateEditor() {
   };
 
   const handleSave = async () => {
+    if (!template || !currentVersion) return;
     setSaving(true);
     try {
-      const payload = {
+      const paragraphs = sections.map(mapSectionToParagraph);
+      saveTemplateDraft(template.id, currentVersion.id, {
         name: templateName,
-        category,
-        paragraphs: sections,
-      };
-      const res = await fetch(`/api/templates/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        paragraphs,
+        changeLog: changeNote,
       });
-      await res.json();
-    } catch {
-      console.log('保存草稿成功');
     } finally {
       setTimeout(() => setSaving(false), 800);
     }
   };
 
   const handleSubmit = async () => {
+    if (!template || !currentVersion) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/templates/${id}/versions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ changeLog: changeNote, paragraphs: sections }),
+      const paragraphs = sections.map(mapSectionToParagraph);
+      saveTemplateDraft(template.id, currentVersion.id, {
+        name: templateName,
+        paragraphs,
+        changeLog: changeNote,
       });
-      await res.json();
-    } catch {
-      const parts = version.replace('V', '').split('.').map(Number);
-      parts[2] += 1;
-      setVersion(`V${parts.join('.')}`);
-      console.log('提交审核成功');
+      submitTemplateForReview(
+        template.id,
+        currentVersion.id,
+        'u001',
+        '李晓明',
+        changeNote || '提交审核'
+      );
+      alert('提交成功');
+      navigate('/reviews');
     } finally {
       setTimeout(() => setSubmitting(false), 800);
     }
   };
 
   const getTypeConfig = (type: string) => sectionTypes.find((t) => t.key === type);
+
+  if (!template || !currentVersion) {
+    return (
+      <div className="h-[calc(100vh-64px)] flex items-center justify-center bg-neutral-100">
+        <p className="text-neutral-500">加载中...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col bg-neutral-100 animate-fade-in">
@@ -247,7 +241,7 @@ export default function TemplateEditor() {
             />
           </div>
           <CategoryTag category={category} size="md" />
-          <StatusBadge status="draft" size="md" />
+          <StatusBadge status={mapStoreStatusToBadge(template.status)} size="md" />
         </div>
 
         <div className="flex items-center gap-6">
@@ -484,7 +478,7 @@ export default function TemplateEditor() {
               <p className="text-2xl font-bold tracking-wide">{version}</p>
               <div className="mt-3 pt-3 border-t border-white/20 flex items-center gap-1.5 text-xs opacity-80">
                 <Clock className="w-3 h-3" />
-                上次保存：刚刚
+                上次保存：{formatDate(template.updatedAt)}
               </div>
             </div>
           </div>

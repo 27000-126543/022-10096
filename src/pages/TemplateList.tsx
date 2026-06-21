@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Search,
   Plus,
@@ -12,9 +12,12 @@ import {
   User,
   Hash,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { CategoryTag, type CategoryType } from '@/components/ui/CategoryTag';
 import { StatusBadge, type StatusType } from '@/components/ui/StatusBadge';
+import { useDataStore } from '@/store/dataStore';
+import { users, type Template } from '@/data/localMock';
 
 const categoryTabs = [
   { key: 'all', label: '全部' },
@@ -42,69 +45,108 @@ interface TemplateItem {
   updatedAt: string;
   updatedBy: string;
   tags?: string[];
+  versions: Template['versions'];
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function mapStoreStatusToBadge(status: Template['status']): StatusType {
+  if (status === 'pending') return 'reviewing';
+  return status;
+}
+
+function getUserName(userId: string): string {
+  const user = users.find((u) => u.id === userId);
+  return user?.name || '李法务';
 }
 
 export default function TemplateList() {
+  const navigate = useNavigate();
   const [activeCategory, setActiveCategory] = useState('all');
   const [activeStatus, setActiveStatus] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [templates, setTemplates] = useState<TemplateItem[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(9);
-  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const fetchTemplates = async () => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({
-          category: activeCategory,
-          status: activeStatus,
-          keyword: searchKeyword,
-          page: String(page),
-          pageSize: String(pageSize),
-        });
-        const res = await fetch(`/api/templates?${params}`);
-        const result = await res.json();
-        if (result.success) {
-          setTemplates(result.data || []);
-          setTotal(result.total || 0);
-        }
-      } catch {
-        const mockData: TemplateItem[] = [
-          { id: 't001', name: '玻尿酸注射知情同意书', category: 'injection', status: 'published', currentVersion: 'V2.1.3', updatedAt: '2026-06-20 15:30', updatedBy: '李晓明' },
-          { id: 't002', name: '肉毒素瘦脸针知情同意书', category: 'injection', status: 'reviewing', currentVersion: 'V3.0.1', updatedAt: '2026-06-21 10:15', updatedBy: '王慧敏' },
-          { id: 't003', name: '光子嫩肤治疗知情同意书', category: 'skin', status: 'published', currentVersion: 'V1.2.0', updatedAt: '2026-06-18 14:20', updatedBy: '张建国' },
-          { id: 't004', name: '热玛吉抗衰治疗知情同意书', category: 'antiaging', status: 'draft', currentVersion: 'V1.0.0', updatedAt: '2026-06-22 09:45', updatedBy: '赵晓峰' },
-          { id: 't005', name: '双眼皮成形术知情同意书', category: 'plastic', status: 'approved', currentVersion: 'V1.5.2', updatedAt: '2026-06-19 16:00', updatedBy: '陈美玲' },
-          { id: 't006', name: '鼻综合整形手术知情同意书', category: 'plastic', status: 'rejected', currentVersion: 'V2.0.0', updatedAt: '2026-06-20 11:30', updatedBy: '刘伟强' },
-          { id: 't007', name: '水光针注射知情同意书', category: 'injection', status: 'published', currentVersion: 'V1.3.5', updatedAt: '2026-06-17 08:50', updatedBy: '孙丽娟' },
-          { id: 't008', name: '线雕提升术知情同意书', category: 'antiaging', status: 'reviewing', currentVersion: 'V1.1.0', updatedAt: '2026-06-21 14:10', updatedBy: '周文杰' },
-          { id: 't009', name: '点阵激光治疗知情同意书', category: 'skin', status: 'draft', currentVersion: 'V0.9.2', updatedAt: '2026-06-22 11:20', updatedBy: '吴海涛' },
-        ];
-        setTemplates(mockData);
-        setTotal(47);
-      } finally {
-        setLoading(false);
+  const storeTemplates = useDataStore((s) => s.templates);
+  const submitTemplateForReview = useDataStore((s) => s.submitTemplateForReview);
+
+  const filteredTemplates = useMemo(() => {
+    let list = [...storeTemplates];
+
+    if (activeCategory !== 'all') {
+      list = list.filter((t) => t.category === activeCategory);
+    }
+
+    if (activeStatus !== 'all') {
+      if (activeStatus === 'reviewing') {
+        list = list.filter((t) => t.status === 'pending');
+      } else {
+        list = list.filter((t) => t.status === activeStatus);
       }
-    };
-    fetchTemplates();
-  }, [activeCategory, activeStatus, searchKeyword, page, pageSize]);
+    }
 
+    if (searchKeyword.trim()) {
+      const kw = searchKeyword.trim().toLowerCase();
+      list = list.filter((t) => t.name.toLowerCase().includes(kw) || t.id.toLowerCase().includes(kw));
+    }
+
+    return list;
+  }, [storeTemplates, activeCategory, activeStatus, searchKeyword]);
+
+  const total = filteredTemplates.length;
   const totalPages = Math.ceil(total / pageSize);
+  const pagedTemplates = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredTemplates.slice(start, start + pageSize);
+  }, [filteredTemplates, page, pageSize]);
 
-  const handleSubmitReview = (id: string) => {
-    console.log('提交审核:', id);
+  const displayTemplates: TemplateItem[] = useMemo(() => {
+    return pagedTemplates.map((t) => {
+      const currentVer = t.versions.find((v) => v.id === t.currentVersionId) || t.versions[t.versions.length - 1];
+      return {
+        id: t.id,
+        name: t.name,
+        category: t.category as CategoryType,
+        status: mapStoreStatusToBadge(t.status),
+        currentVersion: currentVer ? `V${currentVer.version}` : 'V0.0.0',
+        updatedAt: formatDate(t.updatedAt),
+        updatedBy: getUserName(t.updatedBy),
+        tags: t.tags,
+        versions: t.versions,
+      };
+    });
+  }, [pagedTemplates]);
+
+  const handleSubmitReview = (template: TemplateItem) => {
+    if (template.versions.length === 0) return;
+    const lastVersion = template.versions[template.versions.length - 1];
+    const result = submitTemplateForReview(template.id, lastVersion.id, 'u001', '李晓明', '提交审核');
+    if (result) {
+      alert('提交审核成功');
+    }
   };
 
-  const getActionButtons = (status: StatusType, id: string) => {
+  const handleNavigateEdit = (templateId: string) => {
+    navigate(`/templates/${templateId}`);
+  };
+
+  const getActionButtons = (template: TemplateItem) => {
+    const status = template.status;
     const buttons: JSX.Element[] = [];
 
     if (['draft', 'rejected'].includes(status)) {
       buttons.push(
         <button
           key="edit"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleNavigateEdit(template.id);
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-600 hover:text-primary-600 hover:bg-primary-50 rounded transition-colors"
         >
           <Edit3 className="w-3.5 h-3.5" />
@@ -129,7 +171,10 @@ export default function TemplateList() {
       buttons.push(
         <button
           key="submit"
-          onClick={() => handleSubmitReview(id)}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleSubmitReview(template);
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-primary-500 hover:bg-primary-600 rounded transition-colors"
         >
           <Send className="w-3.5 h-3.5" />
@@ -215,23 +260,11 @@ export default function TemplateList() {
         <div className="flex items-center gap-4 text-xs text-neutral-500 pt-3 border-t border-neutral-100">
           <span>共 <b className="text-neutral-700">{total}</b> 条记录</span>
           <span className="text-neutral-300">|</span>
-          <span>当前显示第 <b className="text-neutral-700">{(page - 1) * pageSize + 1}</b> - <b className="text-neutral-700">{Math.min(page * pageSize, total)}</b> 条</span>
+          <span>当前显示第 <b className="text-neutral-700">{total === 0 ? 0 : (page - 1) * pageSize + 1}</b> - <b className="text-neutral-700">{Math.min(page * pageSize, total)}</b> 条</span>
         </div>
       </div>
 
-      {loading ? (
-        <div className="grid grid-cols-3 gap-5">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="bg-white rounded-lg shadow-paper p-5 animate-pulse">
-              <div className="h-4 bg-neutral-200 rounded w-1/3 mb-4" />
-              <div className="h-6 bg-neutral-200 rounded w-4/5 mb-6" />
-              <div className="h-3 bg-neutral-100 rounded w-full mb-2" />
-              <div className="h-3 bg-neutral-100 rounded w-3/4 mb-6" />
-              <div className="h-8 bg-neutral-100 rounded" />
-            </div>
-          ))}
-        </div>
-      ) : templates.length === 0 ? (
+      {displayTemplates.length === 0 ? (
         <div className="bg-white rounded-lg shadow-paper p-16 text-center">
           <div className="w-16 h-16 mx-auto mb-4 bg-neutral-100 rounded-full flex items-center justify-center">
             <Search className="w-8 h-8 text-neutral-400" />
@@ -240,9 +273,10 @@ export default function TemplateList() {
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-5">
-          {templates.map((template) => (
+          {displayTemplates.map((template) => (
             <div
               key={template.id}
+              onClick={() => handleNavigateEdit(template.id)}
               className="bg-white rounded-lg shadow-paper hover:shadow-paper-hover transition-all cursor-pointer group border border-transparent hover:border-primary-200"
             >
               <div className="p-5">
@@ -275,7 +309,7 @@ export default function TemplateList() {
               </div>
 
               <div className="flex items-center justify-center gap-1 px-5 py-3 border-t border-neutral-100 bg-neutral-50/50 rounded-b-lg">
-                {getActionButtons(template.status, template.id)}
+                {getActionButtons(template)}
               </div>
             </div>
           ))}
