@@ -1,0 +1,345 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-neutral-50 text-neutral-800 min-h-screen;
+    font-feature-settings: 'kern' 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Noto Serif SC', 'SimSun', serif;
+    @apply text-neutral-900 font-semibold;
+  }
+
+  ::selection {
+    @apply bg-primary-100 text-primary-800;
+  }
+}
+
+@layer components {
+  .paper-style {
+    width: 210mm;
+    min-height: 297mm;
+    padding: 20mm 15mm;
+    margin: 20px auto;
+    background: #ffffff;
+    box-shadow: 0 4px 20px rgba(30, 58, 95, 0.15), 0 1px 4px rgba(30, 58, 95, 0.08);
+    border-radius: 2px;
+    position: relative;
+  }
+
+  .paper-style::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #1E3A5F 0%, #476395 100%);
+    border-radius: 2px 2px 0 0;
+  }
+
+  .paper-title {
+    @apply text-center mb-8 pb-6 border-b-2 border-primary-100;
+  }
+
+  .paper-title h1 {
+    @apply text-2xl font-bold text-primary-800 mb-2 tracking-wide;
+  }
+
+  .paper-title p {
+    @apply text-sm text-neutral-500;
+  }
+
+  .paper-section {
+    @apply mb-6;
+  }
+
+  .paper-section-title {
+    @apply text-lg font-semibold text-primary-700 mb-3 pb-2 border-b border-neutral-200 flex items-center gap-2;
+  }
+
+  .paper-section-title::before {
+    content: '';
+    @apply w-1 h-5 bg-primary-500 rounded-sm;
+  }
+
+  .paper-section-content {
+    @apply text-neutral-700 leading-8 text-justify;
+  }
+
+  .paper-section-content p {
+    @apply mb-3 indent-8;
+  }
+
+  .risk-highlight {
+    @apply bg-risk-light border-l-4 border-risk-border p-4 my-4 rounded-r;
+  }
+
+  .risk-highlight-title {
+    @apply font-semibold text-risk-dark mb-2 flex items-center gap-2;
+  }
+
+  .signature-area {
+    @apply mt-16 pt-8 border-t border-neutral-200 grid grid-cols-2 gap-12;
+  }
+
+  .signature-block {
+    @apply text-center;
+  }
+
+  .signature-line {
+    @apply border-b border-neutral-400 mb-2 h-12;
+  }
+
+  .signature-label {
+    @apply text-sm text-neutral-600;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-4 py-2 bg-primary-500 text-white rounded-md hover:bg-primary-600 active:bg-primary-700 transition-colors duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-4 py-2 bg-white border border-neutral-300 text-neutral-700 rounded-md hover:bg-neutral-50 active:bg-neutral-100 transition-colors duration-200 font-medium text-sm;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center px-4 py-2 bg-danger-500 text-white rounded-md hover:bg-danger-600 active:bg-danger-700 transition-colors duration-200 font-medium text-sm;
+  }
+
+  .btn-success {
+    @apply inline-flex items-center justify-center px-4 py-2 bg-success-500 text-white rounded-md hover:bg-success-600 active:bg-success-700 transition-colors duration-200 font-medium text-sm;
+  }
+
+  .card {
+    @apply bg-white rounded-md shadow-card border border-neutral-200/60 overflow-hidden;
+  }
+
+  .card-header {
+    @apply px-5 py-4 border-b border-neutral-200/80 flex items-center justify-between bg-gradient-to-r from-neutral-50/50 to-white;
+  }
+
+  .card-body {
+    @apply p-5;
+  }
+
+  .table-container {
+    @apply overflow-x-auto rounded-md border border-neutral-200;
+  }
+
+  .table-pro {
+    @apply w-full text-sm;
+  }
+
+  .table-pro thead {
+    @apply bg-neutral-50 border-b border-neutral-200;
+  }
+
+  .table-pro th {
+    @apply px-4 py-3 text-left font-semibold text-neutral-700 whitespace-nowrap;
+  }
+
+  .table-pro tbody tr {
+    @apply border-b border-neutral-100 hover:bg-primary-50/30 transition-colors;
+  }
+
+  .table-pro td {
+    @apply px-4 py-3 text-neutral-700;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-draft {
+    @apply bg-neutral-100 text-neutral-600;
+  }
+
+  .badge-reviewing {
+    @apply bg-warning-50 text-warning-700 border border-warning-200;
+  }
+
+  .badge-approved {
+    @apply bg-success-50 text-success-700 border border-success-200;
+  }
+
+  .badge-rejected {
+    @apply bg-danger-50 text-danger-700 border border-danger-200;
+  }
+
+  .badge-published {
+    @apply bg-primary-50 text-primary-700 border border-primary-200;
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-md text-neutral-600 hover:bg-primary-50 hover:text-primary-700 transition-all duration-200 cursor-pointer;
+  }
+
+  .sidebar-item-active {
+    @apply bg-primary-500 text-white hover:bg-primary-600 hover:text-white shadow-sm;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 border border-neutral-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-primary-400 transition-all;
+  }
+
+  .form-label {
+    @apply block text-sm font-medium text-neutral-700 mb-1.5;
+  }
+
+  .stat-card {
+    @apply relative overflow-hidden rounded-lg bg-white p-5 shadow-card border border-neutral-200/60;
+  }
+
+  .stat-card-icon {
+    @apply absolute right-4 top-4 w-12 h-12 rounded-lg flex items-center justify-center opacity-20;
+  }
+
+  .timeline {
+    @apply relative pl-8 space-y-6;
+  }
+
+  .timeline::before {
+    content: '';
+    @apply absolute left-3 top-2 bottom-2 w-0.5 bg-neutral-200;
+  }
+
+  .timeline-item {
+    @apply relative;
+  }
+
+  .timeline-dot {
+    @apply absolute -left-5 top-1 w-4 h-4 rounded-full border-2 border-white shadow-sm;
+  }
+}
+
+@layer utilities {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-neutral-100 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-neutral-300 rounded-full hover:bg-neutral-400 transition-colors;
+  }
+
+  ::-webkit-scrollbar-thumb:active {
+    @apply bg-primary-400;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #BDBDBD #F5F5F5;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .font-serif-cn {
+    font-family: 'Noto Serif SC', 'SimSun', serif;
+  }
+
+  .font-sans-cn {
+    font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-white !important;
+  }
+
+  .paper-style {
+    width: 100%;
+    min-height: auto;
+    padding: 15mm 15mm;
+    margin: 0;
+    box-shadow: none;
+    border-radius: 0;
+    page-break-after: always;
+  }
+
+  .paper-style::before {
+    display: none;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .card,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-success,
+  .sidebar,
+  .header,
+  .pagination,
+  .action-buttons {
+    display: none !important;
+  }
+
+  .table-container {
+    @apply border-none shadow-none overflow-visible;
+  }
+
+  .table-pro thead {
+    @apply bg-neutral-100;
+  }
+
+  .table-pro tbody tr {
+    @apply border-b border-neutral-300;
+  }
+
+  .risk-highlight {
+    @apply bg-neutral-50 border border-neutral-300;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .badge {
+    @apply border border-neutral-400 bg-white;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .signature-area {
+    @apply mt-12 pt-6;
+    page-break-inside: avoid;
+  }
+
+  .paper-section {
+    page-break-inside: avoid;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+  }
+
+  table, figure {
+    page-break-inside: avoid;
+  }
+}

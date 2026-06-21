@@ -1,0 +1,123 @@
+/** @type {import('tailwindcss').Config} */
+
+export default {
+  darkMode: "class",
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  theme: {
+    container: {
+      center: true,
+    },
+    extend: {
+      colors: {
+        primary: {
+          50: '#E8EEF5',
+          100: '#C9D5E5',
+          200: '#9FB3CF',
+          300: '#6E8AB4',
+          400: '#476395',
+          500: '#1E3A5F',
+          600: '#1A3251',
+          700: '#152841',
+          800: '#101F33',
+          900: '#0B1625',
+        },
+        success: {
+          50: '#E6F2EC',
+          100: '#C2DFCD',
+          200: '#8FC4A4',
+          300: '#5CA87A',
+          400: '#3E8F60',
+          500: '#2E7D5B',
+          600: '#25684B',
+          700: '#1C523B',
+          800: '#143D2B',
+          900: '#0C281B',
+        },
+        warning: {
+          50: '#FBF5E5',
+          100: '#F3E5BF',
+          200: '#E6CB80',
+          300: '#D9B040',
+          400: '#C69918',
+          500: '#B8860B',
+          600: '#9B7109',
+          700: '#7D5C08',
+          800: '#5E4606',
+          900: '#3F3004',
+        },
+        danger: {
+          50: '#F2E5E8',
+          100: '#E0BFC6',
+          200: '#C88090',
+          300: '#B0415A',
+          400: '#9A2D47',
+          500: '#8B2635',
+          600: '#76202D',
+          700: '#611925',
+          800: '#4C131D',
+          900: '#370D15',
+        },
+        risk: {
+          light: '#FFF3E0',
+          DEFAULT: '#FFE0B2',
+          dark: '#E65100',
+          border: '#FF8A65',
+        },
+        category: {
+          injection: '#7B4B94',
+          skin: '#2D7DD2',
+          plastic: '#2E7D5B',
+          antiaging: '#B8860B',
+        },
+        neutral: {
+          50: '#FAFAFA',
+          100: '#F5F5F5',
+          200: '#EEEEEE',
+          300: '#E0E0E0',
+          400: '#BDBDBD',
+          500: '#9E9E9E',
+          600: '#757575',
+          700: '#616161',
+          800: '#424242',
+          900: '#212121',
+        },
+      },
+      fontFamily: {
+        serif: ['"Noto Serif SC"', 'SimSun', 'serif'],
+        sans: ['"Noto Sans SC"', 'Microsoft YaHei', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'Consolas', 'monospace'],
+      },
+      boxShadow: {
+        paper: '0 2px 8px rgba(30, 58, 95, 0.08), 0 1px 3px rgba(30, 58, 95, 0.04)',
+        'paper-hover': '0 4px 16px rgba(30, 58, 95, 0.12), 0 2px 6px rgba(30, 58, 95, 0.06)',
+        card: '0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03)',
+        sidebar: '2px 0 8px rgba(30, 58, 95, 0.06)',
+      },
+      borderRadius: {
+        'sm': '2px',
+        'md': '4px',
+        'lg': '6px',
+      },
+      keyframes: {
+        'fade-in': {
+          '0%': { opacity: '0', transform: 'translateY(4px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'slide-in': {
+          '0%': { opacity: '0', transform: 'translateX(-8px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        'pulse-soft': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.6' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 0.3s ease-out',
+        'slide-in': 'slide-in 0.25s ease-out',
+        'pulse-soft': 'pulse-soft 2s ease-in-out infinite',
+      },
+    },
+  },
+  plugins: [],
+};
