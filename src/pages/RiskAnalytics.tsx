@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   BarChart,
   Bar,
@@ -30,13 +31,20 @@ import {
   ArrowDownRight,
   FileSpreadsheet,
   ChevronRight,
+  ChevronDown,
   Shield,
   Users,
   FileText,
   Tag,
+  User,
+  Store,
+  X,
+  ExternalLink,
+  FileCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DataTable } from '@/components/ui/DataTable';
+import { useDataStore, signatureHasComplaint } from '@/store/dataStore';
 import {
   analyticsSummary,
   riskTermStats,
@@ -46,6 +54,7 @@ import {
   RiskTermStats,
   ReSignStats,
   ComplaintAssociation,
+  SignatureRecord,
 } from '@/data/localMock';
 
 type TabType = 'dwell' | 'resign' | 'complaint';
@@ -77,6 +86,17 @@ function getRiskLevelLabel(avgDuration: number, skipRate: number): { label: stri
     return { label: '低风险', className: 'bg-primary-50 text-primary-700 border-primary-200' };
   }
   return { label: '正常', className: 'bg-success-50 text-success-700 border-success-200' };
+}
+
+function maskName(name: string): string {
+  if (!name || name.length <= 1) return name;
+  if (name.length === 2) return name[0] + '*';
+  return name[0] + '*'.repeat(name.length - 2) + name[name.length - 1];
+}
+
+function formatDateTime(isoStr: string): string {
+  const d = new Date(isoStr);
+  return `${d.toLocaleDateString('zh-CN')} ${d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 export default function RiskAnalytics() {
@@ -280,6 +300,10 @@ export default function RiskAnalytics() {
 }
 
 function DwellAnalysisTab() {
+  const navigate = useNavigate();
+  const getSignaturesByParagraphId = useDataStore(s => s.getSignaturesByParagraphId);
+  const [expandedParagraphId, setExpandedParagraphId] = useState<string | null>(null);
+
   const topRiskData = useMemo(() => {
     return riskTermStats.slice(0, 20).map((stat) => ({
       ...stat,
@@ -288,6 +312,39 @@ function DwellAnalysisTab() {
       riskLevel: getRiskLevelLabel(stat.avgDuration, stat.skipRate),
     }));
   }, []);
+
+  const expandedTerm = topRiskData.find(t => t.paragraphId === expandedParagraphId);
+  const relatedSignatures = useMemo(() => {
+    if (!expandedParagraphId) return [];
+    return getSignaturesByParagraphId(expandedParagraphId);
+  }, [expandedParagraphId, getSignaturesByParagraphId]);
+
+  const signatureStats = useMemo(() => {
+    if (relatedSignatures.length === 0) {
+      return { total: 0, avgDuration: 0, complaintCount: 0 };
+    }
+    const durations = relatedSignatures.map(s => {
+      const reading = s.paragraphReadings.find(p => p.paragraphId === expandedParagraphId);
+      return reading?.duration || 0;
+    });
+    const avgDuration = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+    const complaintCount = relatedSignatures.filter(s => signatureHasComplaint(s.id)).length;
+    return { total: relatedSignatures.length, avgDuration, complaintCount };
+  }, [relatedSignatures, expandedParagraphId]);
+
+  const displaySignatures = useMemo(() => {
+    return relatedSignatures.slice(0, 10);
+  }, [relatedSignatures]);
+
+  const toggleExpand = (paragraphId: string) => {
+    setExpandedParagraphId(prev => prev === paragraphId ? null : paragraphId);
+  };
+
+  const handleBarClick = (data: any) => {
+    if (data?.activePayload?.[0]?.payload) {
+      toggleExpand(data.activePayload[0].payload.paragraphId);
+    }
+  };
 
   const columns = [
     {
@@ -421,13 +478,33 @@ function DwellAnalysisTab() {
     {
       key: 'action',
       title: '操作',
-      width: '90px',
+      width: '130px',
       align: 'center' as const,
-      render: () => (
-        <div className="flex items-center justify-center">
-          <button className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200 rounded-sm transition-colors">
-            <Eye size={11} />
-            详情
+      render: (row: RiskTermStats) => (
+        <div className="flex items-center justify-center gap-2">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleExpand(row.paragraphId);
+            }}
+            className={cn(
+              'inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-sm transition-colors',
+              expandedParagraphId === row.paragraphId
+                ? 'bg-primary-100 text-primary-700 border border-primary-300'
+                : 'text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200'
+            )}
+          >
+            {expandedParagraphId === row.paragraphId ? (
+              <>
+                <ChevronDown size={11} />
+                收起
+              </>
+            ) : (
+              <>
+                <Eye size={11} />
+                查看关联签署
+              </>
+            )}
           </button>
         </div>
       ),
@@ -441,7 +518,7 @@ function DwellAnalysisTab() {
           <BarChart3 size={16} className="text-primary-600" />
           <h3 className="text-sm font-semibold text-neutral-800">TOP 20 高停留风险条款</h3>
           <span className="text-[11px] text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded-sm">
-            平均停留时间越长，通常表示条款越难理解或争议越多
+            点击柱状图或表格行查看关联签署记录
           </span>
         </div>
         <div className="flex items-center gap-3 text-[11px]">
@@ -464,11 +541,12 @@ function DwellAnalysisTab() {
         </div>
       </div>
 
-      <div className="bg-neutral-50 border border-neutral-200 rounded-sm p-4" style={{ height: '360px' }}>
+      <div className="bg-neutral-50 border border-neutral-200 rounded-sm p-4 cursor-pointer" style={{ height: '360px' }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={topRiskData}
             margin={{ top: 10, right: 20, left: 0, bottom: 60 }}
+            onClick={handleBarClick}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" vertical={false} />
             <XAxis
@@ -508,9 +586,14 @@ function DwellAnalysisTab() {
               dataKey="avgDuration"
               radius={[3, 3, 0, 0]}
               maxBarSize={28}
+              cursor="pointer"
             >
               {topRiskData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
+                <Cell
+                  key={`cell-${index}`}
+                  fill={entry.color}
+                  opacity={expandedParagraphId && expandedParagraphId !== entry.paragraphId ? 0.5 : 1}
+                />
               ))}
             </Bar>
           </BarChart>
@@ -531,13 +614,178 @@ function DwellAnalysisTab() {
           rowKey="paragraphId"
           pageSize={8}
           stripe
+          onRowClick={(row) => toggleExpand(row.paragraphId)}
         />
       </div>
+
+      {expandedTerm && (
+        <div className="bg-white border border-primary-200 rounded-sm shadow-md overflow-hidden animate-fade-in">
+          <div className="bg-gradient-to-r from-primary-50 to-white border-b border-primary-100 px-5 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-sm bg-primary-100 flex items-center justify-center">
+                <FileCheck size={18} className="text-primary-600" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-neutral-800">
+                  「{expandedTerm.paragraphTitle}」关联签署记录
+                </h4>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  模板：{expandedTerm.templateName}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setExpandedParagraphId(null)}
+              className="w-7 h-7 flex items-center justify-center rounded-sm hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 px-5 py-4 bg-neutral-50/50 border-b border-neutral-100">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-primary-700 font-mono">{signatureStats.total}</div>
+              <div className="text-xs text-neutral-500 mt-1">签署记录总数</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-warning-600 font-mono">{signatureStats.avgDuration}s</div>
+              <div className="text-xs text-neutral-500 mt-1">平均停留时长</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-danger-600 font-mono">{signatureStats.complaintCount}</div>
+              <div className="text-xs text-neutral-500 mt-1">涉诉记录数</div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-neutral-50">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-600">顾客姓名</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-600">项目名称</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-600">门店</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">模板版本</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">签署时间</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">该条款停留</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">涉诉</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displaySignatures.map((sig) => {
+                  const reading = sig.paragraphReadings.find(p => p.paragraphId === expandedParagraphId);
+                  const hasComplaint = signatureHasComplaint(sig.id);
+                  return (
+                    <tr
+                      key={sig.id}
+                      className={cn(
+                        'border-b border-neutral-100 last:border-b-0 transition-colors',
+                        hasComplaint ? 'bg-danger-50/40' : 'hover:bg-neutral-50'
+                      )}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center">
+                            <User size={10} className="text-white" />
+                          </div>
+                          <span className="text-sm text-neutral-800 font-medium">
+                            {maskName(sig.customerName)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <Tag size={11} className="text-primary-500" />
+                          <span className="text-xs text-neutral-700 truncate max-w-[120px]" title={sig.projectName}>
+                            {sig.projectName}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <Store size={11} className="text-primary-500" />
+                          <span className="text-xs text-neutral-700 truncate max-w-[100px]">
+                            {sig.storeName}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-medium bg-neutral-100 text-neutral-700 border border-neutral-200 rounded-sm">
+                          v{sig.templateVersion}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="text-xs text-neutral-700">
+                          {formatDateTime(sig.signedAt)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={cn(
+                          'inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-sm font-mono',
+                          (reading?.duration || 0) >= 90
+                            ? 'bg-danger-100 text-danger-700'
+                            : (reading?.duration || 0) >= 60
+                            ? 'bg-warning-100 text-warning-700'
+                            : 'bg-primary-50 text-primary-700'
+                        )}>
+                          {reading?.duration || 0}s
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {hasComplaint ? (
+                          <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-danger-100 text-danger-700 rounded-sm">
+                            <AlertTriangle size={11} />
+                            <span className="text-[11px] font-medium">涉诉</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-neutral-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <button
+                          onClick={() => navigate(`/signatures/${sig.id}`)}
+                          className="text-primary-600 hover:text-primary-700 hover:underline text-xs font-medium inline-flex items-center gap-0.5"
+                        >
+                          查看详情
+                          <ExternalLink size={10} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {displaySignatures.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-10 text-center text-neutral-400 text-sm">
+                      暂无关联签署记录
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {relatedSignatures.length > 10 && (
+            <div className="px-5 py-3 bg-neutral-50 border-t border-neutral-100 text-center">
+              <button
+                onClick={() => navigate('/signatures')}
+                className="text-primary-600 hover:text-primary-700 hover:underline text-xs font-medium inline-flex items-center gap-1"
+              >
+                查看全部 {relatedSignatures.length} 条记录
+                <ChevronRight size={12} />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 function ResignAnalysisTab() {
+  const navigate = useNavigate();
+  const signatures = useDataStore(s => s.signatures);
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+
   const pieData = useMemo(() => {
     return resignStats.slice(0, 8).map((stat, idx) => ({
       name: stat.projectName,
@@ -556,6 +804,37 @@ function ResignAnalysisTab() {
       正常率: Number((95 - Math.sin(idx * 0.8) * 2 - Math.random() * 1.5).toFixed(2)),
     }));
   }, []);
+
+  const expandedProject = resignStats.find(s => s.projectId === expandedProjectId);
+
+  const projectResignRecords = useMemo(() => {
+    if (!expandedProjectId) return [];
+    return signatures
+      .filter(s => s.projectId === expandedProjectId && s.status === 'resigned')
+      .sort((a, b) => new Date(b.signedAt).getTime() - new Date(a.signedAt).getTime())
+      .slice(0, 5);
+  }, [expandedProjectId, signatures]);
+
+  const relatedTemplates = useMemo(() => {
+    if (!expandedProjectId) return [];
+    const tmplSet = new Set<string>();
+    signatures
+      .filter(s => s.projectId === expandedProjectId)
+      .forEach(s => tmplSet.add(`${s.templateName}|v${s.templateVersion}`));
+    return Array.from(tmplSet).slice(0, 3);
+  }, [expandedProjectId, signatures]);
+
+  const toggleExpand = (projectId: string) => {
+    setExpandedProjectId(prev => prev === projectId ? null : projectId);
+  };
+
+  const resignReasons = [
+    '信息填写错误',
+    '身份证号有误',
+    '漏看风险条款',
+    '签名不清晰',
+    '需要补充告知',
+  ];
 
   const columns = [
     {
@@ -668,11 +947,31 @@ function ResignAnalysisTab() {
       title: '操作',
       width: '100px',
       align: 'center' as const,
-      render: () => (
+      render: (row: ReSignStats) => (
         <div className="flex items-center justify-center gap-1.5">
-          <button className="inline-flex items-center gap-0.5 px-2 py-1 text-[11px] text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200 rounded-sm transition-colors">
-            <ChevronRight size={11} />
-            明细
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleExpand(row.projectId);
+            }}
+            className={cn(
+              'inline-flex items-center gap-0.5 px-2 py-1 text-[11px] rounded-sm transition-colors',
+              expandedProjectId === row.projectId
+                ? 'bg-primary-100 text-primary-700 border border-primary-300'
+                : 'text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200'
+            )}
+          >
+            {expandedProjectId === row.projectId ? (
+              <>
+                <ChevronDown size={11} />
+                收起
+              </>
+            ) : (
+              <>
+                <ChevronRight size={11} />
+                明细
+              </>
+            )}
           </button>
         </div>
       ),
@@ -812,13 +1111,190 @@ function ResignAnalysisTab() {
           rowKey="projectId"
           pageSize={8}
           stripe
+          onRowClick={(row) => toggleExpand(row.projectId)}
         />
       </div>
+
+      {expandedProject && (
+        <div className="bg-white border border-warning-200 rounded-sm shadow-md overflow-hidden animate-fade-in">
+          <div className="bg-gradient-to-r from-warning-50 to-white border-b border-warning-100 px-5 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-sm bg-warning-100 flex items-center justify-center">
+                <FileWarning size={18} className="text-warning-600" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-neutral-800">
+                  「{expandedProject.projectName}」补签详情
+                </h4>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  项目补签记录与统计分析
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setExpandedProjectId(null)}
+              className="w-7 h-7 flex items-center justify-center rounded-sm hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-4 gap-4 px-5 py-4 bg-neutral-50/50 border-b border-neutral-100">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-primary-700 font-mono">{expandedProject.totalSignatures}</div>
+              <div className="text-xs text-neutral-500 mt-1">总签署数</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-warning-600 font-mono">{expandedProject.resignedCount}</div>
+              <div className="text-xs text-neutral-500 mt-1">补签数</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-danger-600 font-mono">{expandedProject.resignRate}%</div>
+              <div className="text-xs text-neutral-500 mt-1">补签率</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-bold text-primary-600">
+                {relatedTemplates.length} <span className="text-sm font-normal">个</span>
+              </div>
+              <div className="text-xs text-neutral-500 mt-1">关联模板版本</div>
+            </div>
+          </div>
+
+          {relatedTemplates.length > 0 && (
+            <div className="px-5 py-3 border-b border-neutral-100 bg-white">
+              <div className="text-xs font-medium text-neutral-600 mb-2">关联模板版本：</div>
+              <div className="flex flex-wrap gap-2">
+                {relatedTemplates.map((t, idx) => {
+                  const [name, version] = t.split('|');
+                  return (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] bg-primary-50 text-primary-700 border border-primary-200 rounded-sm"
+                    >
+                      <FileText size={10} />
+                      {truncate(name, 12)}
+                      <span className="font-mono">{version}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="px-5 py-3 bg-neutral-50/30 border-b border-neutral-100">
+            <div className="flex items-center gap-2">
+              <Clock size={13} className="text-warning-500" />
+              <span className="text-sm font-semibold text-neutral-700">最近 5 条补签记录</span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-neutral-50">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-600">顾客姓名</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-600">门店</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">模板版本</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">补签时间</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-600">补签原因</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projectResignRecords.map((sig, idx) => (
+                  <tr
+                    key={sig.id}
+                    className="border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 transition-colors"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-warning-400 to-warning-600 flex items-center justify-center">
+                          <User size={10} className="text-white" />
+                        </div>
+                        <span className="text-sm text-neutral-800 font-medium">
+                          {maskName(sig.customerName)}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <Store size={11} className="text-primary-500" />
+                        <span className="text-xs text-neutral-700 truncate max-w-[100px]">
+                          {sig.storeName}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-medium bg-neutral-100 text-neutral-700 border border-neutral-200 rounded-sm">
+                        v{sig.templateVersion}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <div className="text-xs text-neutral-700">
+                        {formatDateTime(sig.signedAt)}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center px-2 py-0.5 text-[11px] bg-warning-50 text-warning-700 border border-warning-200 rounded-sm">
+                        {resignReasons[idx % resignReasons.length]}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => navigate(`/signatures/${sig.id}`)}
+                        className="text-primary-600 hover:text-primary-700 hover:underline text-xs font-medium inline-flex items-center gap-0.5"
+                      >
+                        查看详情
+                        <ExternalLink size={10} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {projectResignRecords.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-neutral-400 text-sm">
+                      暂无补签记录
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="px-5 py-3 bg-neutral-50 border-t border-neutral-100 text-center">
+            <button
+              onClick={() => navigate('/signatures?status=resigned')}
+              className="text-primary-600 hover:text-primary-700 hover:underline text-xs font-medium inline-flex items-center gap-1"
+            >
+              查看全部补签记录
+              <ChevronRight size={12} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function ComplaintAnalysisTab() {
+  const navigate = useNavigate();
+  const signatures = useDataStore(s => s.signatures);
+  const [expandedComplaintId, setExpandedComplaintId] = useState<string | null>(null);
+
+  const expandedComplaint = complaintAssociations.find(c => c.id === expandedComplaintId);
+
+  const relatedComplaintSignatures = useMemo(() => {
+    if (!expandedComplaint) return [];
+    return signatures
+      .filter(s => s.projectId === expandedComplaint.projectId && signatureHasComplaint(s.id))
+      .sort((a, b) => new Date(b.signedAt).getTime() - new Date(a.signedAt).getTime())
+      .slice(0, 10);
+  }, [expandedComplaint, signatures]);
+
+  const toggleExpand = (id: string) => {
+    setExpandedComplaintId(prev => prev === id ? null : id);
+  };
+
   const columns = [
     {
       key: 'index',
@@ -950,11 +1426,31 @@ function ComplaintAnalysisTab() {
       title: '操作',
       width: '100px',
       align: 'center' as const,
-      render: () => (
+      render: (row: ComplaintAssociation) => (
         <div className="flex items-center justify-center gap-1.5">
-          <button className="inline-flex items-center gap-0.5 px-2.5 py-1 text-[11px] text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200 rounded-sm transition-colors">
-            <Eye size={11} />
-            追溯
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleExpand(row.id);
+            }}
+            className={cn(
+              'inline-flex items-center gap-0.5 px-2.5 py-1 text-[11px] rounded-sm transition-colors',
+              expandedComplaintId === row.id
+                ? 'bg-danger-100 text-danger-700 border border-danger-300'
+                : 'text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200'
+            )}
+          >
+            {expandedComplaintId === row.id ? (
+              <>
+                <ChevronDown size={11} />
+                收起
+              </>
+            ) : (
+              <>
+                <Eye size={11} />
+                追溯
+              </>
+            )}
           </button>
         </div>
       ),
@@ -1098,8 +1594,186 @@ function ComplaintAnalysisTab() {
           rowKey="id"
           pageSize={10}
           stripe
+          onRowClick={(row) => toggleExpand(row.id)}
         />
       </div>
+
+      {expandedComplaint && (
+        <div className="bg-white border border-danger-200 rounded-sm shadow-md overflow-hidden animate-fade-in">
+          <div className="bg-gradient-to-r from-danger-50 to-white border-b border-danger-100 px-5 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-sm bg-danger-100 flex items-center justify-center">
+                <AlertOctagon size={18} className="text-danger-600" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-neutral-800">
+                  「{expandedComplaint.projectName}」涉诉签署档案
+                </h4>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  主要涉及条款：{expandedComplaint.paragraphTitle}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setExpandedComplaintId(null)}
+              className="w-7 h-7 flex items-center justify-center rounded-sm hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 px-5 py-4 bg-danger-50/30 border-b border-danger-100">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-danger-700 font-mono">{expandedComplaint.complaintCount}</div>
+              <div className="text-xs text-neutral-500 mt-1">客诉数量</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-warning-600 font-mono">
+                {((expandedComplaint.complaintCount / expandedComplaint.associatedSignatures) * 100).toFixed(2)}%
+              </div>
+              <div className="text-xs text-neutral-500 mt-1">涉诉比例</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-primary-600 font-mono">{expandedComplaint.associatedSignatures}</div>
+              <div className="text-xs text-neutral-500 mt-1">关联签署总数</div>
+            </div>
+          </div>
+
+          <div className="px-5 py-3 bg-neutral-50/30 border-b border-neutral-100">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={13} className="text-danger-500" />
+              <span className="text-sm font-semibold text-neutral-700">涉诉签署记录列表</span>
+              <span className="text-xs text-danger-600 bg-danger-50 px-2 py-0.5 rounded-sm">
+                红色标记为涉诉记录
+              </span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-neutral-50">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-600">顾客姓名</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-600">项目名称</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-600">门店</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">模板版本</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">签署时间</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">阅读时长</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">涉诉标记</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-neutral-600">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {relatedComplaintSignatures.map((sig) => {
+                  const hasComplaint = signatureHasComplaint(sig.id);
+                  return (
+                    <tr
+                      key={sig.id}
+                      className={cn(
+                        'border-b border-neutral-100 last:border-b-0 transition-colors',
+                        hasComplaint ? 'bg-danger-50/50' : 'hover:bg-neutral-50'
+                      )}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className={cn(
+                            'w-7 h-7 rounded-full flex items-center justify-center',
+                            hasComplaint
+                              ? 'bg-gradient-to-br from-danger-400 to-danger-600'
+                              : 'bg-gradient-to-br from-primary-400 to-primary-600'
+                          )}>
+                            <User size={10} className="text-white" />
+                          </div>
+                          <span className={cn(
+                            'text-sm font-medium',
+                            hasComplaint ? 'text-danger-800' : 'text-neutral-800'
+                          )}>
+                            {maskName(sig.customerName)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <Tag size={11} className="text-primary-500" />
+                          <span className="text-xs text-neutral-700 truncate max-w-[100px]">
+                            {sig.projectName}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <Store size={11} className="text-primary-500" />
+                          <span className="text-xs text-neutral-700 truncate max-w-[90px]">
+                            {sig.storeName}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-medium bg-neutral-100 text-neutral-700 border border-neutral-200 rounded-sm">
+                          v{sig.templateVersion}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="text-xs text-neutral-700">
+                          {formatDateTime(sig.signedAt)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={cn(
+                          'inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-sm font-mono',
+                          sig.totalReadingTime < 60
+                            ? 'bg-danger-100 text-danger-700'
+                            : sig.totalReadingTime < 120
+                            ? 'bg-warning-100 text-warning-700'
+                            : 'bg-success-100 text-success-700'
+                        )}>
+                          {sig.totalReadingTime}s
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {hasComplaint ? (
+                          <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-danger-100 text-danger-700 rounded-sm">
+                            <AlertTriangle size={11} />
+                            <span className="text-[11px] font-medium">涉诉</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-neutral-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <button
+                          onClick={() => navigate(`/signatures/${sig.id}`)}
+                          className="text-primary-600 hover:text-primary-700 hover:underline text-xs font-medium inline-flex items-center gap-0.5"
+                        >
+                          查看档案
+                          <ExternalLink size={10} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {relatedComplaintSignatures.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-10 text-center text-neutral-400 text-sm">
+                      暂无涉诉签署记录
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="px-5 py-3 bg-neutral-50 border-t border-neutral-100 text-center">
+            <button
+              onClick={() => navigate('/signatures')}
+              className="text-primary-600 hover:text-primary-700 hover:underline text-xs font-medium inline-flex items-center gap-1"
+            >
+              查看全部签署记录
+              <ChevronRight size={12} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

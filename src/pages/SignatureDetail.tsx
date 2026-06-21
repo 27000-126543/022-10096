@@ -24,10 +24,10 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { useDataStore } from '@/store/dataStore';
+import { useDataStore, signatureHasComplaint, getComplaintDetail } from '@/store/dataStore';
 import type { TemplateParagraph } from '@/data/localMock';
 
-type ActionType = 'read' | 'explain' | 'confirm' | 'sign';
+type ActionType = 'read' | 'explain' | 'confirm' | 'sign' | 'complaint';
 
 interface TimelineAction {
   id: string;
@@ -71,12 +71,11 @@ export default function SignatureDetail() {
   const version = template?.versions.find((v) => v.id === signature.templateVersionId);
   const paragraphs = version?.paragraphs || [];
 
-  const sigIndex = useMemo(() => {
-    const idx = signatures.findIndex(s => s.id === signature.id);
-    return idx >= 0 ? idx : 0;
-  }, [signatures, signature.id]);
+  const hasComplaint = signatureHasComplaint(signature.id);
 
-  const hasComplaint = sigIndex % 15 === 0;
+  const complaintDetail = useMemo(() => {
+    return getComplaintDetail(signature.id, signature.signedAt, signature.paragraphReadings);
+  }, [signature]);
 
   const timelineActions: TimelineAction[] = useMemo(() => {
     const actions: TimelineAction[] = [];
@@ -131,8 +130,19 @@ export default function SignatureDetail() {
       operator: maskName(signature.customerName),
     });
 
+    if (hasComplaint && complaintDetail) {
+      actions.push({
+        id: 'action_complaint',
+        type: 'complaint',
+        label: '客诉发起',
+        description: `顾客发起客诉，原因：${complaintDetail.complaintType}`,
+        timestamp: complaintDetail.complaintTime,
+        operator: maskName(signature.customerName),
+      });
+    }
+
     return actions;
-  }, [signature, paragraphs]);
+  }, [signature, paragraphs, hasComplaint, complaintDetail]);
 
   const actionIcon = (type: ActionType) => {
     switch (type) {
@@ -144,6 +154,8 @@ export default function SignatureDetail() {
         return <ShieldCheck size={14} />;
       case 'sign':
         return <PenLine size={14} />;
+      case 'complaint':
+        return <AlertTriangle size={14} />;
     }
   };
 
@@ -157,6 +169,8 @@ export default function SignatureDetail() {
         return 'bg-success-500 border-success-500';
       case 'sign':
         return 'bg-danger-500 border-danger-500';
+      case 'complaint':
+        return 'bg-red-600 border-red-600';
     }
   };
 
@@ -202,6 +216,19 @@ export default function SignatureDetail() {
           </button>
         </div>
       </div>
+
+      {hasComplaint && complaintDetail && (
+        <div className="mb-5 p-3 rounded-sm bg-danger-50 border border-danger-200 text-danger-700 flex items-center gap-2">
+          <AlertTriangle size={18} className="flex-shrink-0" />
+          <div className="flex-1">
+            <span className="font-semibold">涉诉档案</span>
+            <span className="ml-2 text-sm">该签署记录已关联客诉事件</span>
+          </div>
+          <div className="text-xs font-mono bg-white/60 px-2 py-1 rounded-sm border border-danger-200">
+            {complaintDetail.complaintId}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-6 gap-4 mb-5">
         <div className="col-span-2 bg-white border border-neutral-200 rounded-sm shadow-paper p-4 bg-gradient-to-br from-primary-50/50 to-white">
@@ -310,6 +337,64 @@ export default function SignatureDetail() {
           </div>
         </div>
       </div>
+
+      {hasComplaint && complaintDetail && (
+        <div className="mb-5 bg-white border border-danger-200 rounded-sm shadow-paper overflow-hidden">
+          <div className="px-5 py-3 bg-gradient-to-r from-danger-50/50 to-white border-b border-danger-200 flex items-center gap-2">
+            <AlertTriangle size={16} className="text-danger-600" />
+            <span className="text-sm font-semibold text-neutral-800">涉诉信息</span>
+            <span className={cn(
+              'ml-2 inline-flex items-center px-2 py-0.5 rounded-sm text-[11px] font-medium',
+              complaintDetail.handleStatus === 'processing'
+                ? 'bg-warning-50 text-warning-700 border border-warning-200'
+                : 'bg-success-50 text-success-700 border border-success-200'
+            )}>
+              {complaintDetail.handleStatusLabel}
+            </span>
+          </div>
+          <div className="p-5">
+            <div className="grid grid-cols-4 gap-5">
+              <div>
+                <div className="text-xs text-neutral-500 mb-1">涉诉编号</div>
+                <div className="text-sm font-mono font-semibold text-neutral-800">{complaintDetail.complaintId}</div>
+              </div>
+              <div>
+                <div className="text-xs text-neutral-500 mb-1">关联投诉类型</div>
+                <div className="text-sm font-medium text-neutral-800">{complaintDetail.complaintType}</div>
+              </div>
+              <div>
+                <div className="text-xs text-neutral-500 mb-1">投诉时间</div>
+                <div className="text-sm font-medium text-neutral-800">
+                  {new Date(complaintDetail.complaintTime).toLocaleDateString('zh-CN')}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-neutral-500 mb-1">处理状态</div>
+                <div className={cn(
+                  'text-sm font-medium',
+                  complaintDetail.handleStatus === 'processing' ? 'text-warning-600' : 'text-success-600'
+                )}>
+                  {complaintDetail.handleStatusLabel}
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-neutral-100">
+              <div className="text-xs text-neutral-500 mb-2">关联风险条款（停留时间最长）</div>
+              <div className="flex flex-wrap gap-2">
+                {complaintDetail.riskTerms.map((term, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center px-2.5 py-1 rounded-sm text-[11px] font-medium bg-danger-50 text-danger-700 border border-danger-200"
+                  >
+                    <AlertTriangle size={10} className="mr-1" />
+                    {term}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-20 gap-5">
         <div className="col-span-13">

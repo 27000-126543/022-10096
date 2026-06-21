@@ -4,6 +4,7 @@ import {
   Trash2,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
   Plus,
   GripVertical,
   Save,
@@ -91,6 +92,21 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const dotColorMap: Record<string, string> = {
+  draft_saved: 'bg-neutral-400',
+  submitted: 'bg-primary-500',
+  approved: 'bg-success-500',
+  rejected: 'bg-danger-500',
+  deployed: 'bg-purple-500',
+  withdrawn: 'bg-neutral-500',
+};
+
 export default function TemplateEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -98,6 +114,7 @@ export default function TemplateEditor() {
   const templates = useDataStore((s) => s.templates);
   const saveTemplateDraft = useDataStore((s) => s.saveTemplateDraft);
   const submitTemplateForReview = useDataStore((s) => s.submitTemplateForReview);
+  const getTemplateActivityLogs = useDataStore((s) => s.getTemplateActivityLogs);
 
   const template = useMemo(() => {
     if (id && id !== 'new') {
@@ -126,6 +143,13 @@ export default function TemplateEditor() {
   const [changeNote, setChangeNote] = useState(currentVersion?.changeLog || '');
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const templateId = template?.id || '';
+  const historyLogs = useMemo(() => {
+    if (!templateId) return [];
+    return getTemplateActivityLogs(templateId).slice(0, 10);
+  }, [templateId, getTemplateActivityLogs]);
 
   const handleAddSection = (type: string) => {
     const typeConfig = sectionTypes.find((t) => t.key === type);
@@ -514,7 +538,61 @@ export default function TemplateEditor() {
             </div>
           </div>
 
-          <div className="p-4 space-y-2">
+          <div className="border-t border-neutral-100">
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="w-full px-4 py-3 flex items-center justify-between hover:bg-neutral-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-primary-500" />
+                <span className="text-sm font-semibold text-neutral-700">版本历史</span>
+                <span className="text-[10px] text-neutral-400">({historyLogs.length})</span>
+              </div>
+              {showHistory ? (
+                <ChevronDown className="w-4 h-4 text-neutral-400" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-neutral-400" />
+              )}
+            </button>
+            {showHistory && (
+              <div className="px-4 pb-4 max-h-[240px] overflow-y-auto">
+                <div className="relative pl-3">
+                  <div className="absolute left-[5px] top-1 bottom-1 w-px bg-neutral-200" />
+                  {historyLogs.length === 0 ? (
+                    <div className="text-[11px] text-neutral-400 py-2 text-center">
+                      暂无历史记录
+                    </div>
+                  ) : (
+                    historyLogs.map((log) => (
+                      <div
+                        key={log.id}
+                        className="relative pb-3 last:pb-0 group"
+                        title={log.description}
+                      >
+                        <div className={cn(
+                          'absolute -left-[7px] top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white',
+                          dotColorMap[log.type] || 'bg-neutral-400'
+                        )} />
+                        <div className="pl-2">
+                          <div className="text-[11px] font-medium text-neutral-700 flex items-center justify-between">
+                            <span className="truncate">{log.typeLabel}</span>
+                            <span className="text-[10px] text-neutral-400 flex-shrink-0 ml-2">
+                              {formatShortDate(log.timestamp)}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-neutral-400 mt-0.5 truncate">
+                            {log.operatorName}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 space-y-2 border-t border-neutral-100">
             <button
               onClick={handleSave}
               disabled={saving}

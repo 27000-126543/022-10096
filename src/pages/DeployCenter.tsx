@@ -1,8 +1,12 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import {
   Search,
   Plus,
   ChevronRight,
+  ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
+  ChevronLeft,
   Check,
   X,
   Calendar,
@@ -12,6 +16,7 @@ import {
   MapPin,
   Building2,
   AlertCircle,
+  AlertTriangle,
   Eye,
   Download,
   Undo2,
@@ -22,7 +27,7 @@ import { cn } from '@/lib/utils';
 import { DataTable } from '@/components/ui/DataTable';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useDataStore } from '@/store/dataStore';
-import type { Template, Region, DeployRecord } from '@/data/localMock';
+import type { Template, Region, DeployRecord, Store } from '@/data/localMock';
 
 type TabType = 'new' | 'records';
 
@@ -45,6 +50,25 @@ const categoryColorMap: Record<string, string> = {
   plastic: 'text-[#2E7D5B] bg-[#2E7D5B]/10 border-[#2E7D5B]/30',
   antiaging: 'text-[#B8860B] bg-[#B8860B]/10 border-[#B8860B]/30',
 };
+
+function formatDateTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function getTodayDateString(): string {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export default function DeployCenter() {
   const [activeTab, setActiveTab] = useState<TabType>('new');
@@ -109,9 +133,10 @@ export default function DeployCenter() {
 function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
   const templates = useDataStore(s => s.templates);
   const stores = useDataStore(s => s.stores);
+  const deploys = useDataStore(s => s.deploys);
   const createDeployRecord = useDataStore(s => s.createDeployRecord);
 
-  const publishedTemplates = templates.filter((t) => t.status === 'approved');
+  const publishedTemplates = templates.filter((t) => t.status === 'approved' || t.status === 'published');
 
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(publishedTemplates[0] || null);
   const [templateSearch, setTemplateSearch] = useState('');
@@ -126,6 +151,7 @@ function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
   const [scheduledTime, setScheduledTime] = useState('');
   const [forceReadingMinutes, setForceReadingMinutes] = useState<number>(5);
   const [versionNote, setVersionNote] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
 
   const filteredTemplates = useMemo(() => {
     if (!templateSearch.trim()) return publishedTemplates;
@@ -168,12 +194,30 @@ function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
     const citiesCount = new Set(
       stores.filter((s) => effectiveStores.has(s.id)).map((s) => s.city)
     ).size;
+    const regionCount = new Set(
+      stores.filter((s) => effectiveStores.has(s.id)).map((s) => s.region)
+    ).size;
     return {
       stores: effectiveStores.size,
       cities: citiesCount,
+      regions: regionCount,
       effectiveStoreIds: Array.from(effectiveStores),
+      previewStoreNames: stores
+        .filter((s) => effectiveStores.has(s.id))
+        .slice(0, 5)
+        .map((s) => s.name),
+      moreStoresCount: Math.max(0, effectiveStores.size - 5),
     };
   }, [selectedStores, storesInSelectedCities, stores]);
+
+  const replacedReleases = useMemo(() => {
+    if (!selectedTemplate || previewStats.effectiveStoreIds.length === 0) return [];
+    return deploys.filter((d) => {
+      if (d.templateId !== selectedTemplate.id) return false;
+      if (d.status !== 'active' && d.status !== 'scheduled') return false;
+      return d.storeIds.some((sid) => previewStats.effectiveStoreIds.includes(sid));
+    });
+  }, [selectedTemplate, previewStats.effectiveStoreIds, deploys]);
 
   const toggleRegion = (region: Region) => {
     const newRegions = new Set(selectedRegions);
@@ -615,26 +659,34 @@ function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 bg-white border border-neutral-200 rounded-sm">
-              <div>
-                <div className="text-sm font-medium text-neutral-800">立即发布</div>
-                <div className="text-xs text-neutral-500 mt-0.5">
-                  确认后立即在所有选中门店生效
-                </div>
-              </div>
+            <div className="flex border border-neutral-200 rounded-sm overflow-hidden">
               <button
                 onClick={() => setIsImmediate(true)}
                 className={cn(
-                  'w-12 h-6 rounded-full transition-colors relative',
-                  isImmediate ? 'bg-primary-500' : 'bg-neutral-300'
+                  'flex-1 py-2.5 text-sm font-medium transition-colors',
+                  isImmediate
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-white text-neutral-600 hover:bg-neutral-50'
                 )}
               >
-                <span
-                  className={cn(
-                    'absolute top-0.5 w-5 h-5 bg-white rounded-sm shadow transition-all',
-                    isImmediate ? 'left-6' : 'left-0.5'
-                  )}
-                />
+                <span className="flex items-center justify-center gap-1.5">
+                  <Clock size={14} />
+                  立即发布
+                </span>
+              </button>
+              <button
+                onClick={() => setIsImmediate(false)}
+                className={cn(
+                  'flex-1 py-2.5 text-sm font-medium transition-colors',
+                  !isImmediate
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-white text-neutral-600 hover:bg-neutral-50'
+                )}
+              >
+                <span className="flex items-center justify-center gap-1.5">
+                  <Calendar size={14} />
+                  定时发布
+                </span>
               </button>
             </div>
 
@@ -642,14 +694,15 @@ function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
               <div className="p-3 bg-white border border-warning-200 rounded-sm bg-warning-50/30">
                 <div className="flex items-center gap-2 mb-3">
                   <Calendar size={14} className="text-warning-600" />
-                  <span className="text-sm font-medium text-warning-800">定时发布</span>
+                  <span className="text-sm font-medium text-warning-800">选择生效时间</span>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
                     <label className="text-xs text-neutral-600 mb-1 block">发布日期</label>
                     <input
                       type="date"
                       value={scheduledDate}
+                      min={getTodayDateString()}
                       onChange={(e) => setScheduledDate(e.target.value)}
                       className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-sm focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200"
                     />
@@ -664,6 +717,11 @@ function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
                     />
                   </div>
                 </div>
+                {scheduledDate && scheduledTime && (
+                  <div className="text-xs text-warning-700 bg-warning-100/50 px-3 py-2 rounded-sm border border-warning-200">
+                    <span className="font-medium">将于 {scheduledDate} {scheduledTime} 生效</span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -710,6 +768,113 @@ function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
         </div>
       </div>
 
+      {selectedTemplate && previewStats.stores > 0 && (
+        <div className="bg-primary-50 border border-primary-100 rounded-sm p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Eye size={18} className="text-primary-600" />
+            <h3 className="text-sm font-semibold text-primary-800">发布预览</h3>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center gap-4">
+              <div className="text-xs text-neutral-500 w-20 flex-shrink-0">模板版本</div>
+              <div className="text-sm font-medium text-neutral-800">
+                {selectedTemplate.name}
+                <span className="ml-2 text-xs font-mono text-primary-600 bg-primary-100 px-2 py-0.5 rounded-sm">
+                  v{selectedTemplate.versions.find((v) => v.id === selectedTemplate.currentVersionId)?.version}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="text-xs text-neutral-500 w-20 flex-shrink-0">覆盖范围</div>
+              <div className="text-sm text-neutral-700">
+                <span className="font-medium">{previewStats.regions}</span> 个区域 / 
+                <span className="font-medium">{previewStats.cities}</span> 个城市 / 
+                <span className="font-medium">{previewStats.stores}</span> 家门店
+              </div>
+            </div>
+
+            <div className="flex items-start gap-4">
+              <div className="text-xs text-neutral-500 w-20 flex-shrink-0 pt-1">门店清单</div>
+              <div className="flex-1">
+                <div className="flex flex-wrap gap-1.5">
+                  {previewStats.previewStoreNames.map((name, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center px-2 py-0.5 text-xs bg-white border border-primary-200 text-primary-700 rounded-sm"
+                  >
+                    {name}
+                  </span>
+                ))}
+                  {previewStats.moreStoresCount > 0 && (
+                    <span className="text-xs text-neutral-500">
+                      等 {previewStats.stores} 家
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {replacedReleases.length > 0 && (
+              <div className="flex items-center gap-4 pt-2 border-t border-primary-200/50">
+                <div className="text-xs text-neutral-500 w-20 flex-shrink-0">替换旧版本</div>
+                <div className="text-sm text-neutral-700">
+                  将覆盖 <span className="font-medium text-warning-600">{replacedReleases.length}</span> 个已有发布记录
+                </div>
+              </div>
+            )}
+          </div>
+
+          {replacedReleases.length > 0 && (
+            <div className="mt-4 bg-warning-50 border border-warning-200 rounded-sm p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={16} className="text-warning-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-sm font-medium text-warning-800 mb-2">
+                    注意：发布后将替换以下门店的旧版本
+                  </div>
+                  <div className="space-y-1">
+                    {replacedReleases.map((rel) => {
+                      const overlapCount = rel.storeIds.filter((sid) =>
+                        previewStats.effectiveStoreIds.includes(sid)
+                      ).length;
+                      return (
+                        <div key={rel.id} className="text-xs text-warning-700 flex items-center gap-2">
+                          <span className="font-mono bg-warning-100 px-1.5 py-0.5 rounded-sm">
+                            v{rel.version}
+                          </span>
+                          <span>影响 {overlapCount} 家门店</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center justify-center py-2">
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <div
+            onClick={() => setConfirmed(!confirmed)}
+            className={cn(
+              'w-4 h-4 rounded-sm border-2 flex items-center justify-center transition-colors',
+              confirmed
+                ? 'bg-primary-500 border-primary-500'
+                : 'border-neutral-300 hover:border-primary-400'
+            )}
+          >
+            {confirmed && <Check size={10} className="text-white" />}
+          </div>
+          <span className="text-sm text-neutral-600">
+            我已确认发布范围和替换影响，确认发布
+          </span>
+        </label>
+      </div>
+
       <div className="flex items-center justify-between p-4 bg-gradient-to-r from-primary-500 to-primary-600 rounded-sm text-white">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-2">
@@ -737,10 +902,10 @@ function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
           </button>
           <button
             onClick={handleConfirmDeploy}
-            disabled={!selectedTemplate || previewStats.stores === 0 || (!isImmediate && (!scheduledDate || !scheduledTime))}
+            disabled={!selectedTemplate || previewStats.stores === 0 || (!isImmediate && (!scheduledDate || !scheduledTime)) || !confirmed}
             className={cn(
               'px-6 py-2.5 text-sm font-medium rounded-sm transition-all shadow-md',
-              (!selectedTemplate || previewStats.stores === 0 || (!isImmediate && (!scheduledDate || !scheduledTime)))
+              (!selectedTemplate || previewStats.stores === 0 || (!isImmediate && (!scheduledDate || !scheduledTime)) || !confirmed)
                 ? 'bg-neutral-300 text-neutral-500 cursor-not-allowed'
                 : 'bg-white text-primary-700 hover:bg-primary-50'
             )}
@@ -764,6 +929,10 @@ function DeployRecordsTab() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [storeFilter, setStoreFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<string>('all');
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [showAllStores, setShowAllStores] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 8;
 
   const filteredRecords = useMemo(() => {
     return deploys.filter((record) => {
@@ -773,156 +942,90 @@ function DeployRecordsTab() {
     });
   }, [statusFilter, storeFilter, deploys]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedRecords = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filteredRecords.slice(start, start + pageSize);
+  }, [filteredRecords, safePage, pageSize]);
+
+  const toggleExpand = (id: string) => {
+    const newExpanded = new Set(expandedRows);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedRows(newExpanded);
+  };
+
+  const toggleShowAllStores = (id: string) => {
+    const newShow = new Set(showAllStores);
+    if (newShow.has(id)) {
+      newShow.delete(id);
+    } else {
+      newShow.add(id);
+    }
+    setShowAllStores(newShow);
+  };
+
   const handleWithdraw = (deployId: string) => {
     if (confirm('确定要撤下此发布吗？')) {
       withdrawDeploy(deployId);
     }
   };
 
-  const columns = [
-    {
-      key: 'templateName',
-      title: '模板名称',
-      width: '240px',
-      render: (row: DeployRecord) => (
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-neutral-800 truncate">{row.templateName}</div>
-          <div className="text-[11px] text-neutral-500 mt-0.5">{row.deployNote || '无备注'}</div>
-        </div>
-      ),
-    },
-    {
-      key: 'version',
-      title: '版本号',
-      width: '90px',
-      align: 'center' as const,
-      render: (row: DeployRecord) => (
-        <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-primary-50 text-primary-700 border border-primary-200 rounded-sm font-mono">
-          v{row.version}
+  const getStoresByCity = (record: DeployRecord) => {
+    const recordStores = stores.filter((s) => record.storeIds.includes(s.id));
+    const byCity: Record<string, Store[]> = {};
+    recordStores.forEach((s) => {
+      if (!byCity[s.city]) {
+        byCity[s.city] = [];
+      }
+      byCity[s.city].push(s);
+    });
+    return byCity;
+  };
+
+  const getStatusBadge = (status: DeployRecord['status']) => {
+    if (status === 'active') {
+      return <StatusBadge status="active" label="生效中" />;
+    }
+    if (status === 'scheduled') {
+      return (
+        <span className="inline-flex items-center border rounded-sm px-2 py-0.5 text-[11px] font-medium bg-warning-50 text-warning-700 border-warning-200">
+          <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-warning-500 animate-pulse-soft" />
+          待生效
         </span>
-      ),
-    },
-    {
-      key: 'scope',
-      title: '发布范围',
-      width: '150px',
-      align: 'center' as const,
-      render: (row: DeployRecord) => (
-        <div>
-          <div className="flex items-center justify-center gap-2 text-sm">
-            <span className="inline-flex items-center gap-1 text-neutral-700">
-              <Building2 size={12} className="text-primary-500" />
-              {row.region.length || new Set(stores.filter((s) => row.storeIds.includes(s.id)).map((s) => s.city)).size} 城
-            </span>
-          </div>
-          <div className="flex items-center justify-center gap-1 mt-0.5 text-xs text-neutral-500">
-            <StoreIcon size={10} className="text-neutral-400" />
-            {row.storeIds.length} 店
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'deployedAt',
-      title: '发布时间',
-      width: '150px',
-      align: 'center' as const,
-      render: (row: DeployRecord) => (
-        <div className="text-center">
-          <div className="text-xs text-neutral-700">
-            {new Date(row.deployedAt).toLocaleDateString('zh-CN')}
-          </div>
-          <div className="text-[11px] text-neutral-500 mt-0.5">
-            {new Date(row.deployedAt).toLocaleTimeString('zh-CN', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'effectiveAt',
-      title: '启用时间',
-      width: '150px',
-      align: 'center' as const,
-      render: (row: DeployRecord) => {
-        const effectiveDate = row.deployType === 'scheduled' && row.scheduledAt ? row.scheduledAt : row.deployedAt;
-        return (
-          <div className="text-center">
-            <div
-              className={cn(
-                'text-xs font-medium',
-                row.deployType === 'scheduled' && !row.scheduledAt ? 'text-warning-600' : 'text-neutral-700'
-              )}
-            >
-              {new Date(effectiveDate).toLocaleDateString('zh-CN')}
-            </div>
-            {row.deployType === 'scheduled' && (
-              <div className="text-[10px] mt-0.5 text-warning-600">定时发布</div>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      key: 'deployedBy',
-      title: '发布人',
-      width: '100px',
-      align: 'center' as const,
-      render: () => (
-        <div className="flex items-center justify-center gap-1.5">
-          <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-[10px] font-medium text-primary-700">
-            医务
-          </div>
-          <span className="text-xs text-neutral-700">王建国</span>
-        </div>
-      ),
-    },
-    {
-      key: 'status',
-      title: '状态',
-      width: '90px',
-      align: 'center' as const,
-      render: (row: DeployRecord) => {
-        if (row.status === 'active') {
-          return <StatusBadge status="active" label="生效中" />;
-        }
-        if (row.status === 'scheduled') {
-          return (
-            <span className="inline-flex items-center border rounded-sm px-2 py-0.5 text-[11px] font-medium bg-warning-50 text-warning-700 border-warning-200">
-              <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-warning-500 animate-pulse-soft" />
-              待生效
-            </span>
-          );
-        }
-        return <StatusBadge status="revoked" label="已撤下" />;
-      },
-    },
-    {
-      key: 'actions',
-      title: '操作',
-      width: '160px',
-      align: 'center' as const,
-      render: (row: DeployRecord) => (
-        <div className="flex items-center justify-center gap-2">
-          <button className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200 rounded-sm transition-colors">
-            <Eye size={12} />
-            详情
-          </button>
-          {(row.status === 'active' || row.status === 'scheduled') && (
-            <button
-              onClick={() => handleWithdraw(row.id)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-danger-600 hover:text-danger-700 hover:bg-danger-50 border border-danger-200 rounded-sm transition-colors"
-            >
-              <Undo2 size={12} />
-              撤下
-            </button>
-          )}
-        </div>
-      ),
-    },
-  ];
+      );
+    }
+    return <StatusBadge status="revoked" label="已撤下" />;
+  };
+
+  const getEffectiveTime = (row: DeployRecord) => {
+    if (row.status === 'withdrawn') {
+      return {
+        date: formatDateTime(row.withdrawnAt),
+        label: '已撤下',
+        type: 'withdrawn',
+      };
+    }
+    if (row.deployType === 'scheduled' && row.scheduledAt) {
+      return {
+        date: formatDateTime(row.scheduledAt),
+        label: '定时生效',
+        type: 'scheduled',
+      };
+    }
+    return {
+      date: formatDateTime(row.deployedAt),
+      label: '立即生效',
+      type: 'immediate',
+    };
+  };
+
+  const startItem = filteredRecords.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const endItem = Math.min(safePage * pageSize, filteredRecords.length);
 
   return (
     <div className="p-6 space-y-4">
@@ -1026,13 +1129,368 @@ function DeployRecordsTab() {
         </div>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={filteredRecords}
-        rowKey="id"
-        pageSize={8}
-        stripe
-      />
+      <div className="bg-white border border-neutral-200 rounded-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-primary-500 text-white">
+              <tr>
+                <th style={{ width: '40px' }} className="px-3 py-3 text-left font-medium text-[13px]">
+                </th>
+                <th style={{ width: '240px' }} className="px-4 py-3 text-left font-medium text-[13px]">
+                  模板名称
+                </th>
+                <th style={{ width: '90px' }} className="px-4 py-3 text-center font-medium text-[13px]">
+                  版本号
+                </th>
+                <th style={{ width: '150px' }} className="px-4 py-3 text-center font-medium text-[13px]">
+                  发布范围
+                </th>
+                <th style={{ width: '150px' }} className="px-4 py-3 text-center font-medium text-[13px]">
+                  发布时间
+                </th>
+                <th style={{ width: '150px' }} className="px-4 py-3 text-center font-medium text-[13px]">
+                  启用时间
+                </th>
+                <th style={{ width: '100px' }} className="px-4 py-3 text-center font-medium text-[13px]">
+                  发布人
+                </th>
+                <th style={{ width: '90px' }} className="px-4 py-3 text-center font-medium text-[13px]">
+                  状态
+                </th>
+                <th style={{ width: '160px' }} className="px-4 py-3 text-center font-medium text-[13px]">
+                  操作
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedRecords.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-16 text-center text-neutral-400 text-sm">
+                    <div className="flex flex-col items-center">
+                      <svg
+                        className="w-12 h-12 text-neutral-300 mb-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.2}
+                          d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+                        />
+                      </svg>
+                      暂无数据
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                paginatedRecords.map((row, idx) => {
+                  const globalIndex = (safePage - 1) * pageSize + idx;
+                  const isExpanded = expandedRows.has(row.id);
+                  const effectiveInfo = getEffectiveTime(row);
+                  const citiesCount = new Set(
+                    stores.filter((s) => row.storeIds.includes(s.id)).map((s) => s.city)
+                  ).size;
+
+                  return (
+                    <Fragment key={row.id}>
+                      <tr
+                        className={cn(
+                          'border-b border-neutral-100 transition-colors',
+                          globalIndex % 2 === 1 && 'bg-neutral-50/70',
+                          isExpanded && 'bg-primary-50/30'
+                        )}
+                      >
+                        <td className="px-3 py-3">
+                          <button
+                            onClick={() => toggleExpand(row.id)}
+                            className="w-6 h-6 flex items-center justify-center rounded-sm hover:bg-neutral-100 transition-colors"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown size={16} className="text-primary-600" />
+                            ) : (
+                              <ChevronRight size={16} className="text-neutral-400" />
+                            )}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-neutral-700">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-neutral-800 truncate">{row.templateName}</div>
+                            <div className="text-[11px] text-neutral-500 mt-0.5">{row.deployNote || '无备注'}</div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center text-neutral-700">
+                          <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-primary-50 text-primary-700 border border-primary-200 rounded-sm font-mono">
+                            v{row.version}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center text-neutral-700">
+                          <div>
+                            <div className="flex items-center justify-center gap-2 text-sm">
+                              <span className="inline-flex items-center gap-1 text-neutral-700">
+                                <Building2 size={12} className="text-primary-500" />
+                                {row.region.length || citiesCount} 城
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-center gap-1 mt-0.5 text-xs text-neutral-500">
+                              <StoreIcon size={10} className="text-neutral-400" />
+                              {row.storeIds.length} 店
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center text-neutral-700">
+                          <div className="text-center">
+                            <div className="text-xs text-neutral-700">
+                              {formatDateTime(row.deployedAt).split(' ')[0]}
+                            </div>
+                            <div className="text-[11px] text-neutral-500 mt-0.5">
+                              {formatDateTime(row.deployedAt).split(' ')[1]}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center text-neutral-700">
+                          <div className="text-center">
+                            <div
+                              className={cn(
+                                'text-xs font-medium',
+                                effectiveInfo.type === 'scheduled' && 'text-warning-600',
+                                effectiveInfo.type === 'withdrawn' && 'text-neutral-500'
+                              )}
+                            >
+                              {effectiveInfo.date.split(' ')[0]}
+                            </div>
+                            <div
+                              className={cn(
+                                'text-[10px] mt-0.5',
+                                effectiveInfo.type === 'scheduled' && 'text-warning-600',
+                                effectiveInfo.type === 'withdrawn' && 'text-neutral-400',
+                                effectiveInfo.type === 'immediate' && 'text-success-600'
+                              )}
+                            >
+                              {effectiveInfo.label}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center text-neutral-700">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-[10px] font-medium text-primary-700">
+                              医务
+                            </div>
+                            <span className="text-xs text-neutral-700">王建国</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {getStatusBadge(row.status)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            {(row.status === 'active' || row.status === 'scheduled') && (
+                              <button
+                                onClick={() => handleWithdraw(row.id)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-danger-600 hover:text-danger-700 hover:bg-danger-50 border border-danger-200 rounded-sm transition-colors"
+                              >
+                                <Undo2 size={12} />
+                                撤下
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-neutral-50/50 border-b border-neutral-100">
+                          <td colSpan={9} className="px-6 py-4">
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                  <div className="text-xs text-neutral-500 mb-1">模板版本</div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium text-neutral-800">{row.templateName}</span>
+                                    <span className="text-xs font-mono text-primary-600 bg-primary-100 px-2 py-0.5 rounded-sm">
+                                      v{row.version}
+                                    </span>
+                                    {getStatusBadge(row.status)}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-xs text-neutral-500 mb-1">发布说明</div>
+                                  <div className="text-sm text-neutral-700">
+                                    {row.deployNote || '无备注'}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-6">
+                                <div>
+                                  <div className="text-xs text-neutral-500 mb-1">发布人</div>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-[10px] font-medium text-primary-700">
+                                      医务
+                                    </div>
+                                    <span className="text-sm text-neutral-700">王建国</span>
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-xs text-neutral-500 mb-1">发布时间</div>
+                                  <div className="text-sm text-neutral-700">
+                                    {formatDateTime(row.deployedAt)}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-xs text-neutral-500 mb-1">生效时间</div>
+                                  <div className="text-sm text-neutral-700">
+                                    {effectiveInfo.date}
+                                    <span
+                                      className={cn(
+                                        'ml-2 text-[11px] px-1.5 py-0.5 rounded-sm',
+                                        effectiveInfo.type === 'scheduled' && 'bg-warning-100 text-warning-700',
+                                        effectiveInfo.type === 'immediate' && 'bg-success-100 text-success-700',
+                                        effectiveInfo.type === 'withdrawn' && 'bg-neutral-100 text-neutral-600'
+                                      )}
+                                    >
+                                      {effectiveInfo.label}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="text-xs text-neutral-500 mb-2">门店清单</div>
+                                <div className="bg-white border border-neutral-200 rounded-sm p-4">
+                                  {Object.entries(getStoresByCity(row)).map(([city, cityStores]) => {
+                                    const displayStores = showAllStores.has(row.id)
+                                      ? cityStores
+                                      : cityStores.slice(0, 5);
+                                    return (
+                                      <div key={city} className="mb-3 last:mb-0">
+                                        <div className="text-sm font-semibold text-neutral-800 mb-2">
+                                          {city} ({cityStores.length}家)
+                                        </div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {displayStores.map((store) => (
+                                            <span
+                                              key={store.id}
+                                              className="inline-flex items-center px-2 py-0.5 text-xs bg-primary-50 text-primary-700 border border-primary-200 rounded-sm"
+                                            >
+                                              {store.name}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                  {row.storeIds.length > 20 && (
+                                    <div className="pt-2 border-t border-neutral-100 mt-3">
+                                      <button
+                                        onClick={() => toggleShowAllStores(row.id)}
+                                        className="text-xs text-primary-600 hover:text-primary-700 hover:underline"
+                                      >
+                                        {showAllStores.has(row.id)
+                                          ? '收起'
+                                          : `共 ${row.storeIds.length} 家，展开查看更多`}
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {filteredRecords.length > 0 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-200 bg-neutral-50/50">
+            <div className="text-xs text-neutral-600">
+              共 <span className="font-medium text-neutral-800">{filteredRecords.length}</span> 条，显示{' '}
+              <span className="font-medium text-neutral-800">{startItem}</span> -{' '}
+              <span className="font-medium text-neutral-800">{endItem}</span> 条
+            </div>
+            <div className="flex items-center space-x-1">
+              <button
+                onClick={() => setCurrentPage(1)}
+                disabled={safePage === 1}
+                className={cn(
+                  'w-7 h-7 flex items-center justify-center rounded-sm border transition-colors',
+                  safePage === 1
+                    ? 'border-neutral-200 text-neutral-300 cursor-not-allowed bg-neutral-50'
+                    : 'border-neutral-300 text-neutral-600 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50/50'
+                )}
+              >
+                <ChevronsLeft size={14} />
+              </button>
+              <button
+                onClick={() => setCurrentPage(safePage - 1)}
+                disabled={safePage === 1}
+                className={cn(
+                  'w-7 h-7 flex items-center justify-center rounded-sm border transition-colors',
+                  safePage === 1
+                    ? 'border-neutral-200 text-neutral-300 cursor-not-allowed bg-neutral-50'
+                    : 'border-neutral-300 text-neutral-600 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50/50'
+                )}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <div className="flex items-center space-x-1 mx-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((p) => {
+                    if (totalPages <= 5) return true;
+                    if (p === 1 || p === totalPages) return true;
+                    return Math.abs(p - safePage) <= 1;
+                  })
+                  .map((p, idx, arr) => (
+                    <div key={p} className="flex items-center">
+                      {idx > 0 && p - arr[idx - 1] > 1 && (
+                        <span className="px-1 text-neutral-400 text-xs">...</span>
+                      )}
+                      <button
+                        onClick={() => setCurrentPage(p)}
+                        className={cn(
+                          'w-7 h-7 flex items-center justify-center rounded-sm border text-xs font-medium transition-colors',
+                          p === safePage
+                            ? 'bg-primary-600 border-primary-600 text-white'
+                            : 'border-neutral-300 text-neutral-600 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50/50'
+                        )}
+                      >
+                        {p}
+                      </button>
+                    </div>
+                  ))}
+              </div>
+              <button
+                onClick={() => setCurrentPage(safePage + 1)}
+                disabled={safePage === totalPages}
+                className={cn(
+                  'w-7 h-7 flex items-center justify-center rounded-sm border transition-colors',
+                  safePage === totalPages
+                    ? 'border-neutral-200 text-neutral-300 cursor-not-allowed bg-neutral-50'
+                    : 'border-neutral-300 text-neutral-600 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50/50'
+                )}
+              >
+                <ChevronRight size={14} />
+              </button>
+              <button
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={safePage === totalPages}
+                className={cn(
+                  'w-7 h-7 flex items-center justify-center rounded-sm border transition-colors',
+                  safePage === totalPages
+                    ? 'border-neutral-200 text-neutral-300 cursor-not-allowed bg-neutral-50'
+                    : 'border-neutral-300 text-neutral-600 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50/50'
+                )}
+              >
+                <ChevronsRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

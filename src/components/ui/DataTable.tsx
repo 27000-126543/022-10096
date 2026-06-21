@@ -21,6 +21,7 @@ export interface DataTableProps<T> {
   className?: string;
   headerClassName?: string;
   onRowClick?: (row: T, index: number) => void;
+  rowClassName?: (row: T, index: number) => string;
   stripe?: boolean;
 }
 
@@ -34,6 +35,7 @@ export function DataTable<T extends object>({
   className,
   headerClassName,
   onRowClick,
+  rowClassName,
   stripe = true,
 }: DataTableProps<T>) {
   const [currentPage, setCurrentPage] = useState(1);
@@ -117,7 +119,8 @@ export function DataTable<T extends object>({
                     className={cn(
                       'border-b border-neutral-100 transition-colors',
                       stripe && globalIndex % 2 === 1 && 'bg-neutral-50/70',
-                      onRowClick && 'cursor-pointer hover:bg-primary-50/50'
+                      onRowClick && 'cursor-pointer hover:bg-primary-50/50',
+                      rowClassName?.(row, globalIndex)
                     )}
                     onClick={onRowClick ? () => onRowClick(row, globalIndex) : undefined}
                   >

@@ -133,12 +133,23 @@ const lineClass: Record<DiffType, string> = {
   unchanged: '',
 };
 
+const dotColorMap: Record<string, string> = {
+  draft_saved: 'bg-neutral-400',
+  submitted: 'bg-primary-500',
+  approved: 'bg-success-500',
+  rejected: 'bg-danger-500',
+  deployed: 'bg-purple-500',
+  withdrawn: 'bg-neutral-500',
+};
+
 export default function ReviewDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const reviews = useDataStore(s => s.reviews);
   const templates = useDataStore(s => s.templates);
   const processReview = useDataStore(s => s.processReview);
+  const getReviewActivityLogs = useDataStore(s => s.getReviewActivityLogs);
+  const getTemplateActivityLogs = useDataStore(s => s.getTemplateActivityLogs);
 
   const review = reviews.find(r => r.id === id) || reviews[0];
   const template = templates.find(t => t.id === review?.templateId);
@@ -167,6 +178,17 @@ export default function ReviewDetail() {
 
   const activeParagraph = paragraphDiffs.find((p) => p.paragraphId === activeTab);
   const isPending = review?.status === 'pending';
+
+  const allLogs = useMemo(() => {
+    if (!id || !template) return [];
+    const reviewLogs = getReviewActivityLogs(id);
+    const templateLogs = getTemplateActivityLogs(template.id).filter(
+      log => log.type === 'draft_saved' || log.type === 'deployed'
+    );
+    const combined = [...reviewLogs, ...templateLogs];
+    const unique = Array.from(new Map(combined.map(log => [log.id, log])).values());
+    return unique.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [id, template, getReviewActivityLogs, getTemplateActivityLogs]);
 
   useEffect(() => {
     if (!isPending && review?.opinion) {
@@ -392,91 +414,137 @@ export default function ReviewDetail() {
         </div>
       </div>
 
-      {/* Diff Viewer */}
-      <div ref={containerRef} className="flex-1 flex overflow-hidden relative">
-        {/* Left - Old Version */}
-        <div
-          className="bg-white overflow-y-auto flex flex-col"
-          style={{ width: `${leftWidth}%` }}
-        >
-          <div className="sticky top-0 z-10 px-4 py-3 bg-neutral-100 border-b border-neutral-200 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-neutral-400" />
-              <span className="text-xs font-semibold text-neutral-600">
-                旧版本
-              </span>
-              <span className="text-xs text-neutral-400 font-mono">
-                {oldVersion ? `v${oldVersion.version}` : '-'}
-              </span>
-            </div>
-            {activeParagraph && (
-              <div className="flex items-center gap-1">
-                {activeParagraph.isRiskHighlight && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-sm bg-risk-light text-risk-dark border border-risk-border">
-                    <AlertTriangle size={9} />
-                    风险条款
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1 p-5 opacity-70">
-            {activeParagraph && renderLines(activeParagraph.oldLines, true, activeParagraph.isRiskHighlight)}
-          </div>
-        </div>
-
-        {/* Draggable Divider */}
-        <div
-          onMouseDown={handleMouseDown}
-          className={cn(
-            'w-1.5 bg-neutral-200 cursor-col-resize flex items-center justify-center transition-colors flex-shrink-0',
-            isDragging ? 'bg-primary-400' : 'hover:bg-primary-300'
-          )}
-        >
+      {/* Diff Viewer + Sidebar */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Diff Viewer */}
+        <div ref={containerRef} className="flex-1 flex overflow-hidden relative">
+          {/* Left - Old Version */}
           <div
+            className="bg-white overflow-y-auto flex flex-col"
+            style={{ width: `${leftWidth}%` }}
+          >
+            <div className="sticky top-0 z-10 px-4 py-3 bg-neutral-100 border-b border-neutral-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-neutral-400" />
+                <span className="text-xs font-semibold text-neutral-600">
+                  旧版本
+                </span>
+                <span className="text-xs text-neutral-400 font-mono">
+                  {oldVersion ? `v${oldVersion.version}` : '-'}
+                </span>
+              </div>
+              {activeParagraph && (
+                <div className="flex items-center gap-1">
+                  {activeParagraph.isRiskHighlight && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-sm bg-risk-light text-risk-dark border border-risk-border">
+                      <AlertTriangle size={9} />
+                      风险条款
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 p-5 opacity-70">
+              {activeParagraph && renderLines(activeParagraph.oldLines, true, activeParagraph.isRiskHighlight)}
+            </div>
+          </div>
+
+          {/* Draggable Divider */}
+          <div
+            onMouseDown={handleMouseDown}
             className={cn(
-              'flex items-center justify-center w-5 h-10 rounded-sm transition-colors',
-              isDragging ? 'bg-primary-500 text-white' : 'bg-neutral-300 text-neutral-500'
+              'w-1.5 bg-neutral-200 cursor-col-resize flex items-center justify-center transition-colors flex-shrink-0',
+              isDragging ? 'bg-primary-400' : 'hover:bg-primary-300'
             )}
           >
-            <GripVertical size={14} />
+            <div
+              className={cn(
+                'flex items-center justify-center w-5 h-10 rounded-sm transition-colors',
+                isDragging ? 'bg-primary-500 text-white' : 'bg-neutral-300 text-neutral-500'
+              )}
+            >
+              <GripVertical size={14} />
+            </div>
+          </div>
+
+          {/* Right - New Version */}
+          <div
+            className="bg-white overflow-y-auto flex flex-col"
+            style={{ width: `${100 - leftWidth}%` }}
+          >
+            <div className="sticky top-0 z-10 px-4 py-3 bg-primary-50 border-b border-primary-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-primary-500" />
+                <span className="text-xs font-semibold text-primary-700">
+                  新版本
+                </span>
+                <span className="text-xs text-primary-500 font-mono">
+                  v{newVersion?.version || review.version}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-[10px]">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 bg-success-100 border-l-2 border-success-400" />
+                  新增
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 bg-danger-100 border-l-2 border-danger-400" />
+                  删除
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 bg-warning-100 border-l-2 border-warning-400" />
+                  修改
+                </span>
+              </div>
+            </div>
+
+            <div className="flex-1 p-5">
+              {activeParagraph && renderLines(activeParagraph.newLines, false, activeParagraph.isRiskHighlight)}
+            </div>
           </div>
         </div>
 
-        {/* Right - New Version */}
-        <div
-          className="bg-white overflow-y-auto flex flex-col"
-          style={{ width: `${100 - leftWidth}%` }}
-        >
-          <div className="sticky top-0 z-10 px-4 py-3 bg-primary-50 border-b border-primary-100 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-primary-500" />
-              <span className="text-xs font-semibold text-primary-700">
-                新版本
-              </span>
-              <span className="text-xs text-primary-500 font-mono">
-                v{newVersion?.version || review.version}
-              </span>
-            </div>
-            <div className="flex items-center gap-3 text-[10px]">
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 bg-success-100 border-l-2 border-success-400" />
-                新增
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 bg-danger-100 border-l-2 border-danger-400" />
-                删除
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 bg-warning-100 border-l-2 border-warning-400" />
-                修改
-              </span>
-            </div>
+        {/* Right Sidebar - Review Logs */}
+        <div className="w-[280px] flex-shrink-0 bg-white border-l border-neutral-200 flex flex-col">
+          <div className="px-4 py-3 border-b border-neutral-100 flex items-center gap-2">
+            <Clock size={14} className="text-primary-500" />
+            <span className="text-sm font-semibold text-neutral-700">审核流水</span>
           </div>
-
-          <div className="flex-1 p-5">
-            {activeParagraph && renderLines(activeParagraph.newLines, false, activeParagraph.isRiskHighlight)}
+          <div className="flex-1 overflow-y-auto py-3">
+            <div className="relative pl-4">
+              <div className="absolute left-[7px] top-1 bottom-1 w-px bg-neutral-200" />
+              {allLogs.length === 0 ? (
+                <div className="text-xs text-neutral-400 py-4 text-center">
+                  暂无流水记录
+                </div>
+              ) : (
+                allLogs.map((log) => (
+                  <div key={log.id} className="relative pb-4 last:pb-0">
+                    <div className={cn(
+                      'absolute -left-[9px] top-0.5 w-3 h-3 rounded-full border-2 border-white',
+                      dotColorMap[log.type] || 'bg-neutral-400'
+                    )} />
+                    <div className="pl-2">
+                      <div className="text-xs font-semibold text-neutral-700">
+                        {log.typeLabel}
+                      </div>
+                      <div className="text-[11px] text-neutral-400 mt-0.5">
+                        {formatDate(log.timestamp)}
+                      </div>
+                      <div className="text-[11px] text-neutral-400">
+                        操作人：{log.operatorName}
+                      </div>
+                      {log.description && (
+                        <div className="text-[11px] text-neutral-500 mt-1 leading-relaxed whitespace-pre-wrap">
+                          {log.description}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>

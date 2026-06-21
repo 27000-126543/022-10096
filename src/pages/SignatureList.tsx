@@ -19,7 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { DataTable } from '@/components/ui/DataTable';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { useDataStore } from '@/store/dataStore';
+import { useDataStore, signatureHasComplaint } from '@/store/dataStore';
 import type { SignatureRecord, Project } from '@/data/localMock';
 
 function maskName(name: string): string {
@@ -45,6 +45,7 @@ export default function SignatureList() {
   const [showStoreDropdown, setShowStoreDropdown] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedComplaint, setSelectedComplaint] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [sortField, setSortField] = useState<string>('signedAt');
@@ -59,10 +60,6 @@ export default function SignatureList() {
     });
     return Array.from(cats.entries()).map(([id, name]) => ({ id, name }));
   }, [projects]);
-
-  const hasComplaint = (index: number): boolean => {
-    return index % 15 === 0;
-  };
 
   const filteredData = useMemo(() => {
     let result = [...signatures];
@@ -86,6 +83,13 @@ export default function SignatureList() {
         result = result.filter((r) => r.status === 'normal');
       } else if (selectedStatus === 'resign') {
         result = result.filter((r) => r.status === 'resigned');
+      }
+    }
+    if (selectedComplaint !== 'all') {
+      if (selectedComplaint === 'complaint') {
+        result = result.filter((r) => signatureHasComplaint(r.id));
+      } else if (selectedComplaint === 'normal') {
+        result = result.filter((r) => !signatureHasComplaint(r.id));
       }
     }
     if (searchText.trim()) {
@@ -135,6 +139,7 @@ export default function SignatureList() {
     selectedStores,
     selectedCategory,
     selectedStatus,
+    selectedComplaint,
     searchText,
     sortField,
     sortOrder,
@@ -161,7 +166,7 @@ export default function SignatureList() {
     const total = filteredData.length;
     const normal = filteredData.filter((r) => r.status === 'normal').length;
     const resigned = filteredData.filter((r) => r.status === 'resigned').length;
-    const complaints = filteredData.reduce((sum, _, idx) => sum + (hasComplaint(idx) ? 1 : 0), 0);
+    const complaints = filteredData.filter((r) => signatureHasComplaint(r.id)).length;
     const avgTime = total > 0
       ? Math.round(filteredData.reduce((sum, r) => sum + r.totalReadingTime, 0) / total)
       : 0;
@@ -321,17 +326,15 @@ export default function SignatureList() {
     {
       key: 'complaint',
       title: '客诉标记',
-      width: '80px',
+      width: '110px',
       align: 'center' as const,
-      render: (_row: SignatureRecord, index: number) => {
-        return hasComplaint(index) ? (
+      render: (row: SignatureRecord) => {
+        return signatureHasComplaint(row.id) ? (
           <div className="flex items-center justify-center">
-            <div
-              className="w-7 h-7 rounded-full bg-danger-100 flex items-center justify-center group relative cursor-help"
-              title="存在客诉记录，请重点关注"
-            >
-              <AlertTriangle size={14} className="text-danger-600" />
-            </div>
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm text-[11px] font-medium bg-danger-50 text-danger-700 border border-danger-200">
+              <AlertTriangle size={12} />
+              涉诉档案
+            </span>
           </div>
         ) : (
           <div className="text-center">
@@ -411,7 +414,9 @@ export default function SignatureList() {
             </div>
           </div>
           <div className="text-2xl font-bold text-danger-700">{stats.complaints}</div>
-          <div className="text-[11px] text-danger-600 mt-1">需重点关注</div>
+          <div className="text-[11px] text-danger-600 mt-1">
+            {stats.total > 0 ? ((stats.complaints / stats.total) * 100).toFixed(1) : 0}% 涉诉率
+          </div>
         </div>
         <div className="bg-white border border-neutral-200 rounded-sm p-4 shadow-paper bg-gradient-to-br from-neutral-50/30 to-white">
           <div className="flex items-center justify-between mb-2">
@@ -550,6 +555,16 @@ export default function SignatureList() {
                 <option value="normal">正常</option>
                 <option value="resign">补签</option>
               </select>
+
+              <select
+                value={selectedComplaint}
+                onChange={(e) => setSelectedComplaint(e.target.value)}
+                className="px-3 py-1.5 text-xs border border-neutral-300 rounded-sm focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200 bg-white"
+              >
+                <option value="all">涉诉状态</option>
+                <option value="complaint">涉诉</option>
+                <option value="normal">非涉诉</option>
+              </select>
             </div>
 
             <div className="flex items-center gap-3">
@@ -608,6 +623,7 @@ export default function SignatureList() {
           rowKey="id"
           pageSize={10}
           stripe
+          rowClassName={(row) => signatureHasComplaint((row as SignatureRecord).id) ? 'bg-danger-50/30' : ''}
         />
       </div>
     </div>
