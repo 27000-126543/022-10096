@@ -23,7 +23,7 @@ import {
   Filter,
   ArrowUpDown,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatDate, formatDateTime } from '@/lib/utils';
 import { DataTable } from '@/components/ui/DataTable';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useDataStore } from '@/store/dataStore';
@@ -50,17 +50,6 @@ const categoryColorMap: Record<string, string> = {
   plastic: 'text-[#2E7D5B] bg-[#2E7D5B]/10 border-[#2E7D5B]/30',
   antiaging: 'text-[#B8860B] bg-[#B8860B]/10 border-[#B8860B]/30',
 };
-
-function formatDateTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return '-';
-  const date = new Date(dateStr);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day} ${hours}:${minutes}`;
-}
 
 function getTodayDateString(): string {
   const today = new Date();
@@ -827,24 +816,34 @@ function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
           </div>
 
           {replacedReleases.length > 0 && (
-            <div className="mt-4 bg-warning-50 border border-warning-200 rounded-sm p-3">
-              <div className="flex items-start gap-2">
-                <AlertTriangle size={16} className="text-warning-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-sm font-medium text-warning-800 mb-2">
-                    注意：发布后将替换以下门店的旧版本
+            <div className="mt-4 bg-warning-50 border-2 border-warning-300 rounded-sm p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={20} className="text-warning-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-warning-800 mb-2">
+                    发布后以下门店的旧版本将自动失效
                   </div>
-                  <div className="space-y-1">
+                  <div className="text-xs text-warning-700 mb-3">
+                    将被替换的发布记录共 <span className="font-semibold">{replacedReleases.length}</span> 条，涉及门店重叠。
+                  </div>
+                  <div className="space-y-2">
                     {replacedReleases.map((rel) => {
                       const overlapCount = rel.storeIds.filter((sid) =>
                         previewStats.effectiveStoreIds.includes(sid)
                       ).length;
                       return (
-                        <div key={rel.id} className="text-xs text-warning-700 flex items-center gap-2">
-                          <span className="font-mono bg-warning-100 px-1.5 py-0.5 rounded-sm">
-                            v{rel.version}
+                        <div key={rel.id} className="bg-white/70 border border-warning-200 rounded-sm px-3 py-2 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-sm font-semibold text-warning-700 bg-warning-100 px-2 py-0.5 rounded-sm">
+                              v{rel.version}
+                            </span>
+                            <span className="text-xs text-neutral-600">
+                              {rel.templateName}
+                            </span>
+                          </div>
+                          <span className="text-xs text-warning-700 font-medium">
+                            {overlapCount} 家门店重叠
                           </span>
-                          <span>影响 {overlapCount} 家门店</span>
                         </div>
                       );
                     })}
@@ -926,17 +925,22 @@ function DeployRecordsTab() {
   const stores = useDataStore(s => s.stores);
   const withdrawDeploy = useDataStore(s => s.withdrawDeploy);
 
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('active_scheduled');
   const [storeFilter, setStoreFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<string>('all');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showAllStores, setShowAllStores] = useState<Set<string>>(new Set());
+  const [showReplacedDeploys, setShowReplacedDeploys] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 8;
 
   const filteredRecords = useMemo(() => {
     return deploys.filter((record) => {
-      if (statusFilter !== 'all' && record.status !== statusFilter) return false;
+      if (statusFilter === 'active_scheduled') {
+        if (record.status !== 'active' && record.status !== 'scheduled') return false;
+      } else if (statusFilter !== 'all' && record.status !== statusFilter) {
+        return false;
+      }
       if (storeFilter !== 'all' && !record.storeIds.includes(storeFilter)) return false;
       return true;
     });
@@ -975,7 +979,7 @@ function DeployRecordsTab() {
     }
   };
 
-  const getStoresByCity = (record: DeployRecord) => {
+  const getStoresByCity = (record: any) => {
     const recordStores = stores.filter((s) => record.storeIds.includes(s.id));
     const byCity: Record<string, Store[]> = {};
     recordStores.forEach((s) => {
@@ -987,7 +991,7 @@ function DeployRecordsTab() {
     return byCity;
   };
 
-  const getStatusBadge = (status: DeployRecord['status']) => {
+  const getStatusBadge = (status: string) => {
     if (status === 'active') {
       return <StatusBadge status="active" label="生效中" />;
     }
@@ -999,15 +1003,25 @@ function DeployRecordsTab() {
         </span>
       );
     }
+    if (status === 'replaced') {
+      return <StatusBadge status="replaced" label="已替换" />;
+    }
     return <StatusBadge status="revoked" label="已撤下" />;
   };
 
-  const getEffectiveTime = (row: DeployRecord) => {
+  const getEffectiveTime = (row: any) => {
     if (row.status === 'withdrawn') {
       return {
         date: formatDateTime(row.withdrawnAt),
         label: '已撤下',
         type: 'withdrawn',
+      };
+    }
+    if (row.status === 'replaced') {
+      return {
+        date: formatDateTime(row.replacedAt),
+        label: '被新版本替换',
+        type: 'replaced',
       };
     }
     if (row.deployType === 'scheduled' && row.scheduledAt) {
@@ -1042,9 +1056,11 @@ function DeployRecordsTab() {
             className="px-3 py-1.5 text-xs border border-neutral-300 rounded-sm focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200 bg-white"
           >
             <option value="all">全部状态</option>
+            <option value="active_scheduled">生效中 + 待生效</option>
             <option value="active">生效中</option>
             <option value="scheduled">待生效</option>
             <option value="withdrawn">已撤下</option>
+            <option value="replaced">已替换</option>
           </select>
 
           <select
@@ -1084,7 +1100,7 @@ function DeployRecordsTab() {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-5 gap-4">
         <div className="p-4 bg-white border border-success-200 rounded-sm bg-gradient-to-br from-success-50/50 to-white">
           <div className="flex items-center justify-between">
             <span className="text-xs text-neutral-600">生效中发布</span>
@@ -1105,6 +1121,17 @@ function DeployRecordsTab() {
           </div>
           <div className="text-2xl font-bold text-warning-700 mt-2">
             {deploys.filter((d) => d.status === 'scheduled').length}
+          </div>
+        </div>
+        <div className="p-4 bg-white border border-orange-200 rounded-sm bg-gradient-to-br from-orange-50/50 to-white">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-neutral-600">已替换</span>
+            <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center">
+              <ArrowUpDown size={16} className="text-orange-600" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-orange-700 mt-2">
+            {deploys.filter((d) => d.status === 'replaced').length}
           </div>
         </div>
         <div className="p-4 bg-white border border-neutral-200 rounded-sm bg-gradient-to-br from-neutral-50/50 to-white">
@@ -1199,7 +1226,8 @@ function DeployRecordsTab() {
                         className={cn(
                           'border-b border-neutral-100 transition-colors',
                           globalIndex % 2 === 1 && 'bg-neutral-50/70',
-                          isExpanded && 'bg-primary-50/30'
+                          isExpanded && 'bg-primary-50/30',
+                          row.status === 'replaced' && 'opacity-60'
                         )}
                       >
                         <td className="px-3 py-3">
@@ -1313,14 +1341,14 @@ function DeployRecordsTab() {
                                   </div>
                                 </div>
                                 <div>
-                                  <div className="text-xs text-neutral-500 mb-1">发布说明</div>
-                                  <div className="text-sm text-neutral-700">
-                                    {row.deployNote || '无备注'}
+                                  <div className="text-xs text-neutral-500 mb-1">批次号</div>
+                                  <div className="text-sm text-neutral-700 font-mono">
+                                    {row.batchId}
                                   </div>
                                 </div>
                               </div>
 
-                              <div className="grid grid-cols-3 gap-6">
+                              <div className="grid grid-cols-4 gap-6">
                                 <div>
                                   <div className="text-xs text-neutral-500 mb-1">发布人</div>
                                   <div className="flex items-center gap-2">
@@ -1332,27 +1360,96 @@ function DeployRecordsTab() {
                                 </div>
                                 <div>
                                   <div className="text-xs text-neutral-500 mb-1">发布时间</div>
-                                  <div className="text-sm text-neutral-700">
-                                    {formatDateTime(row.deployedAt)}
+                                  <div className="text-sm text-neutral-700" title={formatDateTime(row.deployedAt)}>
+                                    {formatDate(row.deployedAt)}
                                   </div>
                                 </div>
                                 <div>
                                   <div className="text-xs text-neutral-500 mb-1">生效时间</div>
-                                  <div className="text-sm text-neutral-700">
-                                    {effectiveInfo.date}
+                                  <div className="text-sm text-neutral-700" title={formatDateTime(effectiveInfo.date)}>
+                                    {formatDate(effectiveInfo.date)}
                                     <span
                                       className={cn(
                                         'ml-2 text-[11px] px-1.5 py-0.5 rounded-sm',
                                         effectiveInfo.type === 'scheduled' && 'bg-warning-100 text-warning-700',
                                         effectiveInfo.type === 'immediate' && 'bg-success-100 text-success-700',
-                                        effectiveInfo.type === 'withdrawn' && 'bg-neutral-100 text-neutral-600'
+                                        effectiveInfo.type === 'withdrawn' && 'bg-neutral-100 text-neutral-600',
+                                        effectiveInfo.type === 'replaced' && 'bg-orange-100 text-orange-700'
                                       )}
                                     >
                                       {effectiveInfo.label}
                                     </span>
                                   </div>
                                 </div>
+                                <div>
+                                  <div className="text-xs text-neutral-500 mb-1">发布说明</div>
+                                  <div className="text-sm text-neutral-700 truncate" title={row.deployNote || '无备注'}>
+                                    {row.deployNote || '无备注'}
+                                  </div>
+                                </div>
                               </div>
+
+                              {row.status === 'withdrawn' && (
+                                <div className="bg-neutral-100 border border-neutral-200 rounded-sm p-3">
+                                  <div className="text-xs text-neutral-500 mb-1">撤下原因</div>
+                                  <div className="text-sm text-neutral-700">
+                                    {row.withdrawReason || '未填写撤下原因'}
+                                  </div>
+                                </div>
+                              )}
+
+                              {row.replacedDeployIds && row.replacedDeployIds.length > 0 && (
+                                <div className="bg-warning-50 border border-warning-200 rounded-sm p-3">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <AlertTriangle size={14} className="text-warning-600" />
+                                      <span className="text-sm font-medium text-warning-800">
+                                        替换了 {row.replacedDeployIds.length} 个旧版本
+                                      </span>
+                                    </div>
+                                    <button
+                                      onClick={() => {
+                                        const newSet = new Set(showReplacedDeploys);
+                                        if (newSet.has(row.id)) {
+                                          newSet.delete(row.id);
+                                        } else {
+                                          newSet.add(row.id);
+                                        }
+                                        setShowReplacedDeploys(newSet);
+                                      }}
+                                      className="text-xs text-warning-600 hover:text-warning-700 hover:underline"
+                                    >
+                                      {showReplacedDeploys.has(row.id) ? '收起' : '展开查看'}
+                                    </button>
+                                  </div>
+                                  {showReplacedDeploys.has(row.id) && (
+                                    <div className="mt-3 space-y-2">
+                                      {row.replacedDeployIds.map((deployId: string) => {
+                                        const replacedDeploy = deploys.find(d => d.id === deployId);
+                                        if (!replacedDeploy) return null;
+                                        const overlapCount = replacedDeploy.storeIds.filter((sid: string) =>
+                                          row.storeIds.includes(sid)
+                                        ).length;
+                                        return (
+                                          <div key={deployId} className="flex items-center justify-between text-xs bg-white/60 px-3 py-2 rounded-sm">
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-mono text-warning-700 bg-warning-100 px-1.5 py-0.5 rounded-sm">
+                                                v{replacedDeploy.version}
+                                              </span>
+                                              <span className="text-neutral-600">
+                                                {replacedDeploy.templateName}
+                                              </span>
+                                            </div>
+                                            <span className="text-neutral-500">
+                                              影响 {overlapCount} 家门店
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
 
                               <div>
                                 <div className="text-xs text-neutral-500 mb-2">门店清单</div>

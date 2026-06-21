@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Search,
   Calendar,
@@ -14,8 +14,9 @@ import {
   User,
   Clock,
   Tag,
+  X,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { DataTable } from '@/components/ui/DataTable';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -35,8 +36,10 @@ function maskIdCard(idCard: string): string {
 
 export default function SignatureList() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const signatures = useDataStore(s => s.signatures);
   const stores = useDataStore(s => s.stores);
+  const templates = useDataStore(s => s.templates);
   const projects = useDataStore(s => s.projects) as Project[];
 
   const [startDate, setStartDate] = useState('');
@@ -46,10 +49,56 @@ export default function SignatureList() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedComplaint, setSelectedComplaint] = useState<string>('all');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('all');
+  const [paragraphId, setParagraphId] = useState<string>('');
   const [searchText, setSearchText] = useState('');
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [sortField, setSortField] = useState<string>('signedAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  useEffect(() => {
+    const tplId = searchParams.get('templateId');
+    const paraId = searchParams.get('paragraphId');
+    const complaint = searchParams.get('complaint');
+    const storeId = searchParams.get('storeId');
+
+    if (tplId) setSelectedTemplateId(tplId);
+    if (paraId) setParagraphId(paraId);
+    if (complaint === '1') setSelectedComplaint('complaint');
+    if (complaint === '0') setSelectedComplaint('normal');
+    if (storeId) setSelectedStores([storeId]);
+
+    setIsInitialized(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    const params = new URLSearchParams();
+    if (selectedTemplateId !== 'all') {
+      params.set('templateId', selectedTemplateId);
+    }
+    if (paragraphId) {
+      params.set('paragraphId', paragraphId);
+    }
+    if (selectedComplaint === 'complaint') {
+      params.set('complaint', '1');
+    } else if (selectedComplaint === 'normal') {
+      params.set('complaint', '0');
+    }
+    if (selectedStores.length === 1) {
+      params.set('storeId', selectedStores[0]);
+    }
+
+    const paramStr = params.toString();
+    if (paramStr) {
+      setSearchParams(params, { replace: false });
+    } else {
+      setSearchParams({}, { replace: false });
+    }
+  }, [selectedTemplateId, paragraphId, selectedComplaint, selectedStores, isInitialized]);
 
   const categoryList = useMemo(() => {
     const cats = new Map<string, string>();
@@ -60,6 +109,16 @@ export default function SignatureList() {
     });
     return Array.from(cats.entries()).map(([id, name]) => ({ id, name }));
   }, [projects]);
+
+  const paragraphName = useMemo(() => {
+    if (!paragraphId) return '';
+    const sig = signatures.find(s => s.paragraphReadings.some(p => p.paragraphId === paragraphId));
+    if (sig) {
+      const reading = sig.paragraphReadings.find(p => p.paragraphId === paragraphId);
+      return reading?.paragraphTitle || '';
+    }
+    return '';
+  }, [paragraphId, signatures]);
 
   const filteredData = useMemo(() => {
     let result = [...signatures];
@@ -74,6 +133,9 @@ export default function SignatureList() {
     }
     if (selectedStores.length > 0) {
       result = result.filter((r) => selectedStores.includes(r.storeId));
+    }
+    if (selectedTemplateId !== 'all') {
+      result = result.filter((r) => r.templateId === selectedTemplateId);
     }
     if (selectedCategory !== 'all') {
       result = result.filter((r) => r.templateCategory === selectedCategory);
@@ -91,6 +153,9 @@ export default function SignatureList() {
       } else if (selectedComplaint === 'normal') {
         result = result.filter((r) => !signatureHasComplaint(r.id));
       }
+    }
+    if (paragraphId) {
+      result = result.filter((r) => r.paragraphReadings.some(p => p.paragraphId === paragraphId));
     }
     if (searchText.trim()) {
       const search = searchText.toLowerCase();
@@ -137,9 +202,11 @@ export default function SignatureList() {
     startDate,
     endDate,
     selectedStores,
+    selectedTemplateId,
     selectedCategory,
     selectedStatus,
     selectedComplaint,
+    paragraphId,
     searchText,
     sortField,
     sortOrder,
@@ -437,6 +504,24 @@ export default function SignatureList() {
         </div>
       </div>
 
+      {paragraphId && paragraphName && (
+        <div className="mb-4 bg-primary-50 border border-primary-200 rounded-sm p-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText size={14} className="text-primary-600" />
+            <span className="text-sm text-neutral-700">
+              当前筛选：读过「<span className="font-semibold text-primary-700">{paragraphName}</span>」的签署，共 <span className="font-bold text-primary-700">{filteredData.length}</span> 条
+            </span>
+          </div>
+          <button
+            onClick={() => setParagraphId('')}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-600 hover:text-neutral-800 hover:bg-white rounded-sm transition-colors"
+          >
+            <X size={12} />
+            清除筛选
+          </button>
+        </div>
+      )}
+
       <div className="bg-white border border-neutral-200 rounded-sm shadow-paper">
         <div className="p-4 border-b border-neutral-200 bg-neutral-50/50">
           <div className="flex items-start justify-between flex-wrap gap-4">
@@ -532,6 +617,19 @@ export default function SignatureList() {
                   </div>
                 )}
               </div>
+
+              <select
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                className="px-3 py-1.5 text-xs border border-neutral-300 rounded-sm focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200 bg-white"
+              >
+                <option value="all">全部模板</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
 
               <select
                 value={selectedCategory}

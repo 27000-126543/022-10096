@@ -40,7 +40,7 @@ export type ProjectMappingConfig = {
   priorTreatmentCount?: number;
 };
 
-export type ActivityLogType = 'draft_saved' | 'submitted' | 'approved' | 'rejected' | 'deployed' | 'withdrawn';
+export type ActivityLogType = 'draft_saved' | 'submitted' | 'approved' | 'rejected' | 'deployed' | 'withdrawn' | 'replaced';
 
 export interface TemplateActivityLog {
   id: string;
@@ -55,6 +55,39 @@ export interface TemplateActivityLog {
   timestamp: string;
   reviewId?: string;
   deployId?: string;
+  detailUrl?: string;
+}
+
+export type DeployStatus = 'active' | 'scheduled' | 'withdrawn' | 'replaced';
+
+export interface DeployRecordExtended extends Omit<DeployRecord, 'status'> {
+  status: DeployStatus;
+  batchId: string;
+  replacedBy?: string;
+  replacedAt?: string;
+  replacedDeployIds: string[];
+  withdrawReason?: string;
+}
+
+export interface LegalReviewSummary {
+  pendingReviews: number;
+  rejectedReviews7d: number;
+  activeDeploys: number;
+  replacedDeploys7d: number;
+  complaintSignatures: number;
+  highRiskTerms: number;
+}
+
+export interface TraceExportItem {
+  signatureId: string;
+  customerName: string;
+  projectName: string;
+  templateName: string;
+  templateVersion: string;
+  storeName: string;
+  signedAt: string;
+  hasComplaint: boolean;
+  riskTerms: string[];
 }
 
 function hashSignatureId(id: string): number {
@@ -115,7 +148,7 @@ interface DataState {
   projectMappings: Record<string, ProjectMappingConfig[]>;
   reviews: ReviewRecord[];
   stores: Store[];
-  deploys: DeployRecord[];
+  deploys: DeployRecordExtended[];
   signatures: SignatureRecord[];
   templateActivityLogs: TemplateActivityLog[];
   riskTermStats: RiskTermStats[];
@@ -149,12 +182,13 @@ interface DataState {
 
   saveProjectMappings: (projectId: string, mappings: ProjectMappingConfig[]) => void;
 
-  createDeployRecord: (deploy: Omit<DeployRecord, 'id' | 'deployedAt'> & {
+  createDeployRecord: (deploy: Omit<DeployRecord, 'id' | 'deployedAt' | 'status'> & {
     operatorId?: string;
     operatorName?: string;
-  }) => void;
+    status?: DeployStatus;
+  }) => DeployRecordExtended;
 
-  withdrawDeploy: (deployId: string, operatorId?: string, operatorName?: string) => void;
+  withdrawDeploy: (deployId: string, operatorId?: string, operatorName?: string, reason?: string) => void;
 
   getSignatureById: (id: string) => SignatureRecord | undefined;
 
@@ -162,11 +196,32 @@ interface DataState {
 
   getReviewActivityLogs: (reviewId: string) => TemplateActivityLog[];
 
-  getDeployById: (id: string) => DeployRecord | undefined;
+  getDeployById: (id: string) => DeployRecordExtended | undefined;
+
+  getDeployBatches: (templateId?: string) => DeployRecordExtended[];
+
+  getDeploysByTemplateId: (templateId: string) => DeployRecordExtended[];
 
   getComplaintSignatures: () => SignatureRecord[];
 
-  getSignaturesByParagraphId: (paragraphId: string) => SignatureRecord[];
+  getSignaturesByParagraphId: (paragraphId: string, templateId?: string) => SignatureRecord[];
+
+  getSignaturesByTemplateId: (templateId: string) => SignatureRecord[];
+
+  getSignaturesByStoreId: (storeId: string) => SignatureRecord[];
+
+  getLegalReviewSummary: () => LegalReviewSummary;
+
+  getRejectedReviews: (days?: number) => ReviewRecord[];
+
+  getRecentReplacedDeploys: (days?: number) => DeployRecordExtended[];
+
+  exportTraceList: (filters?: {
+    templateId?: string;
+    storeId?: string;
+    hasComplaint?: boolean;
+    highRiskOnly?: boolean;
+  }) => TraceExportItem[];
 
   resetToInitial: () => void;
 }
@@ -271,8 +326,15 @@ initReviews.forEach(r => {
     });
   }
 });
-initDeploys.forEach(d => {
-  if (d.status !== 'withdrawn') {
+const initDeploysExtended: DeployRecordExtended[] = initDeploys.map((d, i) => ({
+  ...d,
+  status: d.status as DeployStatus,
+  batchId: `batch_${d.templateId}_${i}`,
+  replacedDeployIds: [],
+}));
+
+initDeploysExtended.forEach(d => {
+  if (d.status !== 'withdrawn' && d.status !== 'replaced') {
     initActivityLogs.push({
       id: generateId('log'),
       templateId: d.templateId,
@@ -285,6 +347,7 @@ initDeploys.forEach(d => {
       description: `发布到 ${d.storeNames.length} 家门店${d.deployNote ? `，说明：${d.deployNote}` : ''}`,
       timestamp: d.deployedAt,
       deployId: d.id,
+      detailUrl: `/deploy`,
     });
   }
 });
@@ -298,7 +361,7 @@ export const useDataStore = create<DataState>()(
       projectMappings: initProjectMappings,
       reviews: JSON.parse(JSON.stringify(initReviews)),
       stores: initStores,
-      deploys: JSON.parse(JSON.stringify(initDeploys)),
+      deploys: JSON.parse(JSON.stringify(initDeploysExtended)),
       signatures: JSON.parse(JSON.stringify(initSignatures)),
       templateActivityLogs: JSON.parse(JSON.stringify(initActivityLogs)),
       riskTermStats: initRiskTermStats,
@@ -341,6 +404,7 @@ export const useDataStore = create<DataState>()(
             operatorName,
             description: `保存草稿：${updates.changeLog ? updates.changeLog : (updates.paragraphs ? '修改段落内容' : '更新模板信息')}`,
             timestamp: now,
+            detailUrl: `/templates/${templateId}`,
           };
           return {
             templates: newTemplates,
@@ -385,6 +449,7 @@ export const useDataStore = create<DataState>()(
           description: changeSummary,
           timestamp: now,
           reviewId: review.id,
+          detailUrl: `/reviews/${review.id}`,
         };
 
         set(state => ({
@@ -417,6 +482,7 @@ export const useDataStore = create<DataState>()(
           description: opinion || (decision === 'approved' ? '审核通过，内容合规' : '审核驳回，请修改'),
           timestamp: now,
           reviewId,
+          detailUrl: `/reviews/${reviewId}`,
         };
 
         set(state => ({
@@ -458,11 +524,31 @@ export const useDataStore = create<DataState>()(
         const now = new Date().toISOString();
         const operatorId = deploy.operatorId || 'u002';
         const operatorName = deploy.operatorName || '王建国';
-        const newDeploy: DeployRecord = {
-          ...deploy,
+        const batchId = generateId('batch');
+        const status = deploy.status || (deploy.deployType === 'immediate' ? 'active' : 'scheduled');
+
+        const newDeploy: DeployRecordExtended = {
+          ...(deploy as any),
           id: generateId('deploy'),
           deployedAt: now,
+          status,
+          batchId,
+          replacedDeployIds: [],
         };
+
+        const state = get();
+        const newStoreIds = new Set(deploy.storeIds || []);
+        const replacedIds: string[] = [];
+        const updatedDeploys = state.deploys.map(d => {
+          if (d.templateId !== deploy.templateId) return d;
+          if (d.status !== 'active' && d.status !== 'scheduled') return d;
+          const hasOverlap = (d.storeIds || []).some(sid => newStoreIds.has(sid));
+          if (!hasOverlap) return d;
+          replacedIds.push(d.id);
+          return { ...d, status: 'replaced' as const, replacedBy: newDeploy.id, replacedAt: now };
+        });
+
+        newDeploy.replacedDeployIds = replacedIds;
 
         const deployLog: TemplateActivityLog = {
           id: generateId('log'),
@@ -473,18 +559,36 @@ export const useDataStore = create<DataState>()(
           typeLabel: '已发布',
           operatorId,
           operatorName,
-          description: `发布到 ${deploy.storeNames?.length || 0} 家门店${deploy.deployNote ? `，说明：${deploy.deployNote}` : ''}`,
+          description: `发布到 ${deploy.storeNames?.length || 0} 家门店${replacedIds.length > 0 ? `，替换 ${replacedIds.length} 个旧版本` : ''}${deploy.deployNote ? `，说明：${deploy.deployNote}` : ''}`,
           timestamp: now,
           deployId: newDeploy.id,
+          detailUrl: `/deploy`,
         };
 
-        set(state => ({
-          deploys: [newDeploy, ...state.deploys],
-          templateActivityLogs: [deployLog, ...state.templateActivityLogs],
+        const replaceLogs: TemplateActivityLog[] = replacedIds.map(rid => ({
+          id: generateId('log'),
+          templateId: deploy.templateId,
+          versionId: deploy.versionId,
+          version: deploy.version,
+          type: 'replaced',
+          typeLabel: '版本替换',
+          operatorId,
+          operatorName,
+          description: `旧版本被新版本 v${deploy.version} 替换`,
+          timestamp: now,
+          deployId: rid,
+          detailUrl: `/deploy`,
         }));
+
+        set(s => ({
+          deploys: [newDeploy, ...updatedDeploys],
+          templateActivityLogs: [deployLog, ...replaceLogs, ...s.templateActivityLogs],
+        }));
+
+        return newDeploy;
       },
 
-      withdrawDeploy: (deployId, operatorId, operatorName) => {
+      withdrawDeploy: (deployId, operatorId, operatorName, reason) => {
         const deploy = get().deploys.find(d => d.id === deployId);
         if (!deploy) return;
         const now = new Date().toISOString();
@@ -500,15 +604,16 @@ export const useDataStore = create<DataState>()(
           typeLabel: '已撤下',
           operatorId: opId,
           operatorName: opName,
-          description: `撤下发布记录`,
+          description: `撤下发布记录${reason ? `：${reason}` : ''}`,
           timestamp: now,
           deployId,
+          detailUrl: `/deploy`,
         };
 
         set(state => ({
           deploys: state.deploys.map(d =>
             d.id === deployId
-              ? { ...d, status: 'withdrawn' as const, withdrawnAt: now }
+              ? { ...d, status: 'withdrawn' as const, withdrawnAt: now, withdrawReason: reason }
               : d
           ),
           templateActivityLogs: [withdrawLog, ...state.templateActivityLogs],
@@ -535,21 +640,111 @@ export const useDataStore = create<DataState>()(
         return get().deploys.find(d => d.id === id);
       },
 
+      getDeployBatches: (templateId) => {
+        const all = get().deploys;
+        const filtered = templateId ? all.filter(d => d.templateId === templateId) : all;
+        return filtered.sort((a, b) =>
+          new Date(b.deployedAt).getTime() - new Date(a.deployedAt).getTime()
+        );
+      },
+
+      getDeploysByTemplateId: (templateId) => {
+        return get().deploys
+          .filter(d => d.templateId === templateId)
+          .sort((a, b) => new Date(b.deployedAt).getTime() - new Date(a.deployedAt).getTime());
+      },
+
       getComplaintSignatures: () => {
         return get().signatures.filter(s => signatureHasComplaint(s.id));
       },
 
-      getSignaturesByParagraphId: (paragraphId) => {
-        return get().signatures.filter(s =>
+      getSignaturesByParagraphId: (paragraphId, templateId) => {
+        const result = get().signatures.filter(s =>
           s.paragraphReadings.some(p => p.paragraphId === paragraphId)
         );
+        if (templateId) {
+          return result.filter(s => s.templateId === templateId);
+        }
+        return result;
+      },
+
+      getSignaturesByTemplateId: (templateId) => {
+        return get().signatures.filter(s => s.templateId === templateId);
+      },
+
+      getSignaturesByStoreId: (storeId) => {
+        return get().signatures.filter(s => s.storeId === storeId);
+      },
+
+      getLegalReviewSummary: () => {
+        const state = get();
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        return {
+          pendingReviews: state.reviews.filter(r => r.status === 'pending').length,
+          rejectedReviews7d: state.reviews.filter(r =>
+            r.status === 'rejected' && r.reviewTime && r.reviewTime >= sevenDaysAgo
+          ).length,
+          activeDeploys: state.deploys.filter(d => d.status === 'active').length,
+          replacedDeploys7d: state.deploys.filter(d =>
+            d.status === 'replaced' && d.replacedAt && d.replacedAt >= sevenDaysAgo
+          ).length,
+          complaintSignatures: state.signatures.filter(s => signatureHasComplaint(s.id)).length,
+          highRiskTerms: state.riskTermStats.filter(r => r.avgDuration > 30).length,
+        };
+      },
+
+      getRejectedReviews: (days = 7) => {
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+        return get().reviews
+          .filter(r => r.status === 'rejected' && r.reviewTime && r.reviewTime >= cutoff)
+          .sort((a, b) => new Date(b.reviewTime || '').getTime() - new Date(a.reviewTime || '').getTime());
+      },
+
+      getRecentReplacedDeploys: (days = 7) => {
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+        return get().deploys
+          .filter(d => d.status === 'replaced' && d.replacedAt && d.replacedAt >= cutoff)
+          .sort((a, b) => new Date(b.replacedAt || '').getTime() - new Date(a.replacedAt || '').getTime());
+      },
+
+      exportTraceList: (filters) => {
+        let list = get().signatures;
+        if (filters?.templateId) {
+          list = list.filter(s => s.templateId === filters.templateId);
+        }
+        if (filters?.storeId) {
+          list = list.filter(s => s.storeId === filters.storeId);
+        }
+        if (filters?.hasComplaint) {
+          list = list.filter(s => signatureHasComplaint(s.id));
+        }
+        if (filters?.highRiskOnly) {
+          list = list.filter(s =>
+            s.paragraphReadings.some(p => p.duration > 60)
+          );
+        }
+        return list.map(s => ({
+          signatureId: s.id,
+          customerName: s.customerName,
+          projectName: s.projectName,
+          templateName: s.templateName,
+          templateVersion: s.templateVersion,
+          storeName: s.storeName,
+          signedAt: s.signedAt,
+          hasComplaint: signatureHasComplaint(s.id),
+          riskTerms: s.paragraphReadings
+            .filter(p => p.duration > 30)
+            .sort((a, b) => b.duration - a.duration)
+            .slice(0, 3)
+            .map(p => p.paragraphTitle),
+        }));
       },
 
       resetToInitial: () => {
         set({
           templates: JSON.parse(JSON.stringify(initTemplates)),
           reviews: JSON.parse(JSON.stringify(initReviews)),
-          deploys: JSON.parse(JSON.stringify(initDeploys)),
+          deploys: JSON.parse(JSON.stringify(initDeploysExtended)),
           signatures: JSON.parse(JSON.stringify(initSignatures)),
           projectMappings: initProjectMappings,
           templateActivityLogs: JSON.parse(JSON.stringify(initActivityLogs)),
@@ -566,7 +761,7 @@ export const useDataStore = create<DataState>()(
         signatures: state.signatures,
         templateActivityLogs: state.templateActivityLogs,
       }),
-      version: 2,
+      version: 3,
     }
   )
 );

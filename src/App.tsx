@@ -12,6 +12,7 @@ import DeployCenter from '@/pages/DeployCenter';
 import SignatureList from '@/pages/SignatureList';
 import SignatureDetail from '@/pages/SignatureDetail';
 import RiskAnalytics from '@/pages/RiskAnalytics';
+import LegalReview from '@/pages/LegalReview';
 
 interface AuthUser {
   username: string;
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="/signatures" element={<SignatureList />} />
           <Route path="/signatures/:id" element={<SignatureDetail />} />
           <Route path="/analytics" element={<RiskAnalytics />} />
+          <Route path="/legal-review" element={<LegalReview />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

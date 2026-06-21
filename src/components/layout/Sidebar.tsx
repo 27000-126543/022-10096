@@ -8,6 +8,7 @@ import {
   Store,
   FileSignature,
   ShieldAlert,
+  Scale,
   User,
   ChevronRight,
 } from 'lucide-react';
@@ -20,6 +21,7 @@ const navItems = [
   { path: '/review', label: '版本审核', icon: FileCheck2 },
   { path: '/publish', label: '门店发布', icon: Store },
   { path: '/signature', label: '签署追踪', icon: FileSignature },
+  { path: '/legal-review', label: '法务复盘', icon: Scale },
   { path: '/risk', label: '风险统计', icon: ShieldAlert },
 ];
 

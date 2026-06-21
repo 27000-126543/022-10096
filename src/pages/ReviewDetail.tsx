@@ -12,7 +12,7 @@ import {
   Info,
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { cn } from '@/lib/utils';
+import { cn, formatDate, formatDateTime } from '@/lib/utils';
 import {
   type TemplateParagraph,
 } from '@/data/localMock';
@@ -116,15 +116,6 @@ function computeParagraphDiffs(
   return result.sort((a, b) => a.order - b.order);
 }
 
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-    d.getDate()
-  ).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(
-    d.getMinutes()
-  ).padStart(2, '0')}`;
-}
-
 const lineClass: Record<DiffType, string> = {
   added: 'bg-success-50 border-l-2 border-success-400 pl-2',
   removed:
@@ -139,6 +130,7 @@ const dotColorMap: Record<string, string> = {
   approved: 'bg-success-500',
   rejected: 'bg-danger-500',
   deployed: 'bg-purple-500',
+  replaced: 'bg-orange-500',
   withdrawn: 'bg-neutral-500',
 };
 
@@ -179,16 +171,20 @@ export default function ReviewDetail() {
   const activeParagraph = paragraphDiffs.find((p) => p.paragraphId === activeTab);
   const isPending = review?.status === 'pending';
 
-  const allLogs = useMemo(() => {
-    if (!id || !template) return [];
-    const reviewLogs = getReviewActivityLogs(id);
-    const templateLogs = getTemplateActivityLogs(template.id).filter(
-      log => log.type === 'draft_saved' || log.type === 'deployed'
-    );
-    const combined = [...reviewLogs, ...templateLogs];
-    const unique = Array.from(new Map(combined.map(log => [log.id, log])).values());
-    return unique.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [id, template, getReviewActivityLogs, getTemplateActivityLogs]);
+  const fullLogs = useMemo(() => {
+    if (!template) return [];
+    return getTemplateActivityLogs(template.id);
+  }, [template, getTemplateActivityLogs]);
+
+  const handleLogClick = (log: any) => {
+    if (log.reviewId) {
+      navigate(`/reviews/${log.reviewId}`);
+    } else if (log.deployId) {
+      navigate('/deploy');
+    } else if (log.detailUrl) {
+      navigate(log.detailUrl);
+    }
+  };
 
   useEffect(() => {
     if (!isPending && review?.opinion) {
@@ -505,44 +501,57 @@ export default function ReviewDetail() {
           </div>
         </div>
 
-        {/* Right Sidebar - Review Logs */}
+        {/* Right Sidebar - Activity Timeline */}
         <div className="w-[280px] flex-shrink-0 bg-white border-l border-neutral-200 flex flex-col">
           <div className="px-4 py-3 border-b border-neutral-100 flex items-center gap-2">
             <Clock size={14} className="text-primary-500" />
-            <span className="text-sm font-semibold text-neutral-700">审核流水</span>
+            <span className="text-sm font-semibold text-neutral-700">全生命周期时间线</span>
           </div>
           <div className="flex-1 overflow-y-auto py-3">
             <div className="relative pl-4">
               <div className="absolute left-[7px] top-1 bottom-1 w-px bg-neutral-200" />
-              {allLogs.length === 0 ? (
+              {fullLogs.length === 0 ? (
                 <div className="text-xs text-neutral-400 py-4 text-center">
                   暂无流水记录
                 </div>
               ) : (
-                allLogs.map((log) => (
-                  <div key={log.id} className="relative pb-4 last:pb-0">
-                    <div className={cn(
-                      'absolute -left-[9px] top-0.5 w-3 h-3 rounded-full border-2 border-white',
-                      dotColorMap[log.type] || 'bg-neutral-400'
-                    )} />
-                    <div className="pl-2">
-                      <div className="text-xs font-semibold text-neutral-700">
-                        {log.typeLabel}
-                      </div>
-                      <div className="text-[11px] text-neutral-400 mt-0.5">
-                        {formatDate(log.timestamp)}
-                      </div>
-                      <div className="text-[11px] text-neutral-400">
-                        操作人：{log.operatorName}
-                      </div>
-                      {log.description && (
-                        <div className="text-[11px] text-neutral-500 mt-1 leading-relaxed whitespace-pre-wrap">
-                          {log.description}
-                        </div>
+                fullLogs.map((log) => {
+                  const isCurrentReview = log.reviewId === id;
+                  const isClickable = log.reviewId || log.deployId || log.detailUrl;
+                  return (
+                    <div
+                      key={log.id}
+                      onClick={() => isClickable && handleLogClick(log)}
+                      className={cn(
+                        'relative pb-4 last:pb-0 transition-colors rounded-r-sm',
+                        isCurrentReview && 'bg-primary-50/60 -ml-4 pl-4 border-l-2 border-primary-500',
+                        isClickable && 'cursor-pointer hover:bg-neutral-50 -ml-4 pl-4 mr-2'
                       )}
+                      title={formatDateTime(log.timestamp)}
+                    >
+                      <div className={cn(
+                        'absolute -left-[9px] top-0.5 w-3 h-3 rounded-full border-2 border-white z-10',
+                        dotColorMap[log.type] || 'bg-neutral-400'
+                      )} />
+                      <div className="pl-2">
+                        <div className="text-xs font-semibold text-neutral-700">
+                          {log.typeLabel}
+                        </div>
+                        <div className="text-[11px] text-neutral-400 mt-0.5">
+                          {formatDate(log.timestamp)}
+                        </div>
+                        <div className="text-[11px] text-neutral-400">
+                          操作人：{log.operatorName}
+                        </div>
+                        {log.description && (
+                          <div className="text-[11px] text-neutral-500 mt-1 leading-relaxed whitespace-pre-wrap">
+                            {log.description}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

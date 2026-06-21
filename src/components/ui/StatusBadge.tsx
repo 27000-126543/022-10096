@@ -10,7 +10,8 @@ export type StatusType =
   | 'active'
   | 'revoked'
   | 'normal'
-  | 'resign';
+  | 'resign'
+  | 'replaced';
 
 const statusConfig: Record<
   StatusType,
@@ -65,6 +66,11 @@ const statusConfig: Record<
     label: '已离职',
     className: 'bg-danger-50 text-danger-700 border-danger-200',
     dotClassName: 'bg-danger-500',
+  },
+  replaced: {
+    label: '已替换',
+    className: 'bg-warning-50 text-warning-700 border-warning-200',
+    dotClassName: 'bg-warning-500',
   },
 };
 

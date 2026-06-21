@@ -302,22 +302,29 @@ export default function RiskAnalytics() {
 function DwellAnalysisTab() {
   const navigate = useNavigate();
   const getSignaturesByParagraphId = useDataStore(s => s.getSignaturesByParagraphId);
+  const templates = useDataStore(s => s.templates);
   const [expandedParagraphId, setExpandedParagraphId] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('all');
 
   const topRiskData = useMemo(() => {
-    return riskTermStats.slice(0, 20).map((stat) => ({
+    let stats = riskTermStats;
+    if (selectedTemplateId !== 'all') {
+      stats = stats.filter(s => s.templateId === selectedTemplateId);
+    }
+    return stats.slice(0, 20).map((stat) => ({
       ...stat,
       shortTitle: truncate(stat.paragraphTitle, 12),
       color: getRiskLevelColor(stat.avgDuration, stat.skipRate),
       riskLevel: getRiskLevelLabel(stat.avgDuration, stat.skipRate),
     }));
-  }, []);
+  }, [selectedTemplateId]);
 
   const expandedTerm = topRiskData.find(t => t.paragraphId === expandedParagraphId);
   const relatedSignatures = useMemo(() => {
     if (!expandedParagraphId) return [];
-    return getSignaturesByParagraphId(expandedParagraphId);
-  }, [expandedParagraphId, getSignaturesByParagraphId]);
+    const tplId = selectedTemplateId !== 'all' ? selectedTemplateId : undefined;
+    return getSignaturesByParagraphId(expandedParagraphId, tplId);
+  }, [expandedParagraphId, selectedTemplateId, getSignaturesByParagraphId]);
 
   const signatureStats = useMemo(() => {
     if (relatedSignatures.length === 0) {
@@ -516,27 +523,48 @@ function DwellAnalysisTab() {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <BarChart3 size={16} className="text-primary-600" />
-          <h3 className="text-sm font-semibold text-neutral-800">TOP 20 高停留风险条款</h3>
+          <h3 className="text-sm font-semibold text-neutral-800">高停留风险条款</h3>
           <span className="text-[11px] text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded-sm">
             点击柱状图或表格行查看关联签署记录
           </span>
         </div>
-        <div className="flex items-center gap-3 text-[11px]">
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm bg-[#1E3A5F]" />
-            <span className="text-neutral-600">正常</span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <FileText size={13} className="text-primary-500" />
+            <span className="text-xs font-medium text-neutral-700">模板：</span>
+            <select
+              value={selectedTemplateId}
+              onChange={(e) => {
+                setSelectedTemplateId(e.target.value);
+                setExpandedParagraphId(null);
+              }}
+              className="px-3 py-1.5 text-xs border border-neutral-300 rounded-sm focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200 bg-white"
+            >
+              <option value="all">全部模板</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm bg-[#B8860B]" />
-            <span className="text-neutral-600">低风险</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm bg-[#E65100]" />
-            <span className="text-neutral-600">中风险</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-sm bg-[#8B2635]" />
-            <span className="text-neutral-600">高风险</span>
+          <div className="flex items-center gap-3 text-[11px]">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-[#1E3A5F]" />
+              <span className="text-neutral-600">正常</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-[#B8860B]" />
+              <span className="text-neutral-600">低风险</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-[#E65100]" />
+              <span className="text-neutral-600">中风险</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-[#8B2635]" />
+              <span className="text-neutral-600">高风险</span>
+            </div>
           </div>
         </div>
       </div>
@@ -764,8 +792,8 @@ function DwellAnalysisTab() {
             </table>
           </div>
 
-          {relatedSignatures.length > 10 && (
-            <div className="px-5 py-3 bg-neutral-50 border-t border-neutral-100 text-center">
+          <div className="px-5 py-3 bg-neutral-50 border-t border-neutral-100 flex items-center justify-center gap-4">
+            {relatedSignatures.length > 10 && (
               <button
                 onClick={() => navigate('/signatures')}
                 className="text-primary-600 hover:text-primary-700 hover:underline text-xs font-medium inline-flex items-center gap-1"
@@ -773,8 +801,24 @@ function DwellAnalysisTab() {
                 查看全部 {relatedSignatures.length} 条记录
                 <ChevronRight size={12} />
               </button>
-            </div>
-          )}
+            )}
+            <button
+              onClick={() => {
+                const params = new URLSearchParams();
+                if (selectedTemplateId !== 'all') {
+                  params.set('templateId', selectedTemplateId);
+                }
+                if (expandedParagraphId) {
+                  params.set('paragraphId', expandedParagraphId);
+                }
+                navigate(`/signatures?${params.toString()}`);
+              }}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-white bg-primary-500 hover:bg-primary-600 rounded-sm transition-colors shadow-sm"
+            >
+              在签署列表中查看
+              <ExternalLink size={11} />
+            </button>
+          </div>
         </div>
       )}
     </div>

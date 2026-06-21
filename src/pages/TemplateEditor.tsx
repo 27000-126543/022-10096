@@ -15,7 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { cn } from '@/lib/utils';
+import { cn, formatDate, formatDateTime } from '@/lib/utils';
 import { CategoryTag, type CategoryType } from '@/components/ui/CategoryTag';
 import { StatusBadge, type StatusType } from '@/components/ui/StatusBadge';
 import { useDataStore } from '@/store/dataStore';
@@ -86,24 +86,13 @@ function mapStoreStatusToBadge(status: Template['status']): StatusType {
   return status;
 }
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function formatShortDate(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 const dotColorMap: Record<string, string> = {
   draft_saved: 'bg-neutral-400',
   submitted: 'bg-primary-500',
   approved: 'bg-success-500',
   rejected: 'bg-danger-500',
   deployed: 'bg-purple-500',
+  replaced: 'bg-orange-500',
   withdrawn: 'bg-neutral-500',
 };
 
@@ -148,8 +137,18 @@ export default function TemplateEditor() {
   const templateId = template?.id || '';
   const historyLogs = useMemo(() => {
     if (!templateId) return [];
-    return getTemplateActivityLogs(templateId).slice(0, 10);
+    return getTemplateActivityLogs(templateId);
   }, [templateId, getTemplateActivityLogs]);
+
+  const handleLogClick = (log: any) => {
+    if (log.reviewId) {
+      navigate(`/reviews/${log.reviewId}`);
+    } else if (log.deployId) {
+      navigate('/deploy');
+    } else if (log.detailUrl) {
+      navigate(log.detailUrl);
+    }
+  };
 
   const handleAddSection = (type: string) => {
     const typeConfig = sectionTypes.find((t) => t.key === type);
@@ -555,7 +554,7 @@ export default function TemplateEditor() {
               )}
             </button>
             {showHistory && (
-              <div className="px-4 pb-4 max-h-[240px] overflow-y-auto">
+              <div className="px-4 pb-4 max-h-[320px] overflow-y-auto">
                 <div className="relative pl-3">
                   <div className="absolute left-[5px] top-1 bottom-1 w-px bg-neutral-200" />
                   {historyLogs.length === 0 ? (
@@ -563,29 +562,41 @@ export default function TemplateEditor() {
                       暂无历史记录
                     </div>
                   ) : (
-                    historyLogs.map((log) => (
-                      <div
-                        key={log.id}
-                        className="relative pb-3 last:pb-0 group"
-                        title={log.description}
-                      >
-                        <div className={cn(
-                          'absolute -left-[7px] top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white',
-                          dotColorMap[log.type] || 'bg-neutral-400'
-                        )} />
-                        <div className="pl-2">
-                          <div className="text-[11px] font-medium text-neutral-700 flex items-center justify-between">
-                            <span className="truncate">{log.typeLabel}</span>
-                            <span className="text-[10px] text-neutral-400 flex-shrink-0 ml-2">
-                              {formatShortDate(log.timestamp)}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-neutral-400 mt-0.5 truncate">
-                            {log.operatorName}
+                    historyLogs.map((log) => {
+                      const isClickable = log.reviewId || log.deployId || log.detailUrl;
+                      return (
+                        <div
+                          key={log.id}
+                          onClick={() => isClickable && handleLogClick(log)}
+                          className={cn(
+                            'relative pb-3 last:pb-0 transition-colors rounded-r-sm',
+                            isClickable && 'cursor-pointer hover:bg-neutral-50 -ml-3 pl-3 mr-1'
+                          )}
+                          title={formatDateTime(log.timestamp)}
+                        >
+                          <div className={cn(
+                            'absolute -left-[7px] top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white z-10',
+                            dotColorMap[log.type] || 'bg-neutral-400'
+                          )} />
+                          <div className="pl-2">
+                            <div className="text-[11px] font-medium text-neutral-700 flex items-center justify-between">
+                              <span className="truncate">{log.typeLabel}</span>
+                              <span className="text-[10px] text-neutral-400 flex-shrink-0 ml-2">
+                                {formatDate(log.timestamp)}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-neutral-400 mt-0.5 truncate">
+                              {log.operatorName}
+                            </div>
+                            {log.description && (
+                              <div className="text-[10px] text-neutral-500 mt-0.5 line-clamp-2">
+                                {log.description}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
