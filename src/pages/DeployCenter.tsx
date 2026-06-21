@@ -22,11 +22,13 @@ import {
   Undo2,
   Filter,
   ArrowUpDown,
+  ArrowRight,
 } from 'lucide-react';
 import { cn, formatDate, formatDateTime } from '@/lib/utils';
 import { DataTable } from '@/components/ui/DataTable';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useDataStore } from '@/store/dataStore';
+import type { BatchStoreVersionChange } from '@/store/dataStore';
 import type { Template, Region, DeployRecord, Store } from '@/data/localMock';
 
 type TabType = 'new' | 'records';
@@ -923,7 +925,9 @@ function NewDeployTab({ onSuccess }: { onSuccess: () => void }) {
 function DeployRecordsTab() {
   const deploys = useDataStore(s => s.deploys);
   const stores = useDataStore(s => s.stores);
+  const reviews = useDataStore(s => s.reviews);
   const withdrawDeploy = useDataStore(s => s.withdrawDeploy);
+  const getBatchVersionChanges = useDataStore(s => s.getBatchVersionChanges);
 
   const [statusFilter, setStatusFilter] = useState<string>('active_scheduled');
   const [storeFilter, setStoreFilter] = useState<string>('all');
@@ -931,8 +935,42 @@ function DeployRecordsTab() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showAllStores, setShowAllStores] = useState<Set<string>>(new Set());
   const [showReplacedDeploys, setShowReplacedDeploys] = useState<Set<string>>(new Set());
+  const [versionCompareDeployId, setVersionCompareDeployId] = useState<string | null>(null);
+  const [collapsedCities, setCollapsedCities] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 8;
+
+  const versionChanges = useMemo(() => {
+    if (!versionCompareDeployId) return [];
+    return getBatchVersionChanges(versionCompareDeployId);
+  }, [versionCompareDeployId, getBatchVersionChanges]);
+
+  const versionChangesByCity = useMemo(() => {
+    if (versionChanges.length === 0) return {};
+    const grouped: Record<string, BatchStoreVersionChange[]> = {};
+    versionChanges.forEach((vc) => {
+      if (!grouped[vc.city]) grouped[vc.city] = [];
+      grouped[vc.city].push(vc);
+    });
+    return grouped;
+  }, [versionChanges]);
+
+  const versionStats = useMemo(() => {
+    const total = versionChanges.length;
+    const upgraded = versionChanges.filter(v => v.changed).length;
+    const firstTime = total - upgraded;
+    return { total, upgraded, firstTime };
+  }, [versionChanges]);
+
+  const toggleCityCollapse = (city: string) => {
+    const newSet = new Set(collapsedCities);
+    if (newSet.has(city)) {
+      newSet.delete(city);
+    } else {
+      newSet.add(city);
+    }
+    setCollapsedCities(newSet);
+  };
 
   const filteredRecords = useMemo(() => {
     return deploys.filter((record) => {
@@ -1407,20 +1445,38 @@ function DeployRecordsTab() {
                                         替换了 {row.replacedDeployIds.length} 个旧版本
                                       </span>
                                     </div>
-                                    <button
-                                      onClick={() => {
-                                        const newSet = new Set(showReplacedDeploys);
-                                        if (newSet.has(row.id)) {
-                                          newSet.delete(row.id);
-                                        } else {
-                                          newSet.add(row.id);
-                                        }
-                                        setShowReplacedDeploys(newSet);
-                                      }}
-                                      className="text-xs text-warning-600 hover:text-warning-700 hover:underline"
-                                    >
-                                      {showReplacedDeploys.has(row.id) ? '收起' : '展开查看'}
-                                    </button>
+                                    <div className="flex items-center gap-3">
+                                      <button
+                                        onClick={() => setVersionCompareDeployId(
+                                          versionCompareDeployId === row.id ? null : row.id
+                                        )}
+                                        className={cn(
+                                          'text-xs px-2 py-1 rounded-sm border transition-colors',
+                                          versionCompareDeployId === row.id
+                                            ? 'text-primary-700 bg-primary-100 border-primary-300'
+                                            : 'text-primary-600 hover:text-primary-700 hover:bg-primary-50 border-primary-200'
+                                        )}
+                                      >
+                                        <span className="flex items-center gap-1">
+                                          <ArrowUpDown size={12} />
+                                          版本对比
+                                        </span>
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          const newSet = new Set(showReplacedDeploys);
+                                          if (newSet.has(row.id)) {
+                                            newSet.delete(row.id);
+                                          } else {
+                                            newSet.add(row.id);
+                                          }
+                                          setShowReplacedDeploys(newSet);
+                                        }}
+                                        className="text-xs text-warning-600 hover:text-warning-700 hover:underline"
+                                      >
+                                        {showReplacedDeploys.has(row.id) ? '收起' : '展开查看'}
+                                      </button>
+                                    </div>
                                   </div>
                                   {showReplacedDeploys.has(row.id) && (
                                     <div className="mt-3 space-y-2">
@@ -1450,6 +1506,74 @@ function DeployRecordsTab() {
                                   )}
                                 </div>
                               )}
+
+                              {(() => {
+                                const relatedReview = reviews.find(r =>
+                                  r.templateId === row.templateId && r.versionId === row.versionId
+                                );
+                                if (!relatedReview) return null;
+                                return (
+                                  <div className="bg-primary-50/50 border border-primary-200 rounded-sm p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                      <FileText size={14} className="text-primary-600" />
+                                      <span className="text-sm font-semibold text-primary-800">关联审核</span>
+                                      <StatusBadge
+                                        status={relatedReview.status === 'pending' ? 'reviewing' : relatedReview.status}
+                                        size="sm"
+                                      />
+                                    </div>
+                                    <div className="relative pl-4">
+                                      <div className="absolute left-[5px] top-1 bottom-1 w-px bg-primary-200" />
+                                      <div className="relative pb-3">
+                                        <div className="absolute -left-[7px] top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white z-10 bg-primary-500" />
+                                        <div className="pl-2">
+                                          <div className="text-[11px] font-medium text-primary-700">提交审核</div>
+                                          <div className="text-[10px] text-neutral-500 mt-0.5">
+                                            提交人：{relatedReview.submitterName} · {formatDate(relatedReview.submitTime)}
+                                          </div>
+                                          <div className="text-[10px] text-neutral-600 mt-0.5">
+                                            变更说明：{relatedReview.changeSummary}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div className="relative pb-3">
+                                        <div className={cn(
+                                          'absolute -left-[7px] top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white z-10',
+                                          relatedReview.status === 'approved' ? 'bg-success-500' : 'bg-danger-500'
+                                        )} />
+                                        <div className="pl-2">
+                                          <div className={cn(
+                                            'text-[11px] font-medium',
+                                            relatedReview.status === 'approved' ? 'text-success-700' : 'text-danger-700'
+                                          )}>
+                                            {relatedReview.status === 'approved' ? '审核通过' : relatedReview.status === 'rejected' ? '审核驳回' : '审核中'}
+                                          </div>
+                                          {relatedReview.reviewerName && (
+                                            <div className="text-[10px] text-neutral-500 mt-0.5">
+                                              审核人：{relatedReview.reviewerName}
+                                              {relatedReview.reviewTime && ` · ${formatDate(relatedReview.reviewTime)}`}
+                                            </div>
+                                          )}
+                                          {relatedReview.opinion && (
+                                            <div className="text-[10px] text-neutral-600 mt-0.5">
+                                              审核意见：{relatedReview.opinion}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="relative">
+                                        <div className="absolute -left-[7px] top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white z-10 bg-purple-500" />
+                                        <div className="pl-2">
+                                          <div className="text-[11px] font-medium text-purple-700">发布上线</div>
+                                          <div className="text-[10px] text-neutral-500 mt-0.5">
+                                            发布人：王建国 · {formatDate(row.deployedAt)}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
 
                               <div>
                                 <div className="text-xs text-neutral-500 mb-2">门店清单</div>
@@ -1490,6 +1614,92 @@ function DeployRecordsTab() {
                                   )}
                                 </div>
                               </div>
+
+                              {versionCompareDeployId === row.id && versionChanges.length > 0 && (
+                                <div className="border border-primary-200 rounded-sm overflow-hidden">
+                                  <div className="bg-gradient-to-r from-primary-50 to-white px-4 py-3 border-b border-primary-100 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <ArrowUpDown size={14} className="text-primary-600" />
+                                      <span className="text-sm font-semibold text-primary-800">版本对比视图</span>
+                                      <span className="text-xs text-neutral-500">
+                                        v{row.version} 发布覆盖详情
+                                      </span>
+                                    </div>
+                                    <button
+                                      onClick={() => setVersionCompareDeployId(null)}
+                                      className="text-xs text-neutral-500 hover:text-neutral-700"
+                                    >
+                                      收起
+                                    </button>
+                                  </div>
+                                  <div className="p-4 space-y-3">
+                                    {Object.entries(versionChangesByCity).map(([city, cityChanges]) => (
+                                      <div key={city} className="border border-neutral-200 rounded-sm overflow-hidden">
+                                        <div
+                                          className="bg-neutral-100 px-4 py-2 flex items-center justify-between cursor-pointer hover:bg-neutral-150 transition-colors"
+                                          onClick={() => toggleCityCollapse(city)}
+                                        >
+                                          <span className="text-sm font-bold text-neutral-800">{city}</span>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[11px] text-neutral-500">{cityChanges.length} 家门店</span>
+                                            {collapsedCities.has(city) ? (
+                                              <ChevronRight size={14} className="text-neutral-400" />
+                                            ) : (
+                                              <ChevronDown size={14} className="text-neutral-400" />
+                                            )}
+                                          </div>
+                                        </div>
+                                        {!collapsedCities.has(city) && (
+                                          <div className="divide-y divide-neutral-100">
+                                            {cityChanges.map((vc) => (
+                                              <div key={vc.storeId} className="px-4 py-2.5 flex items-center justify-between hover:bg-neutral-50 transition-colors">
+                                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                  <StoreIcon size={12} className="text-primary-500 flex-shrink-0" />
+                                                  <span className="text-sm text-neutral-800 truncate">{vc.storeName}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 flex-shrink-0">
+                                                  {vc.changed ? (
+                                                    <>
+                                                      <span className="inline-flex items-center px-1.5 py-0.5 text-[11px] font-mono bg-neutral-100 text-neutral-600 border border-neutral-200 rounded-sm">
+                                                        v{vc.oldVersion}
+                                                      </span>
+                                                      <ArrowRight size={14} className="text-primary-500" />
+                                                      <span className="inline-flex items-center px-1.5 py-0.5 text-[11px] font-mono bg-primary-50 text-primary-700 border border-primary-200 rounded-sm font-medium">
+                                                        v{vc.newVersion}
+                                                      </span>
+                                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-success-50 text-success-700 border border-success-200 rounded-sm">
+                                                        🟢 版本升级
+                                                      </span>
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <span className="inline-flex items-center px-1.5 py-0.5 text-[11px] text-neutral-400 border border-neutral-200 rounded-sm">
+                                                        首次发布
+                                                      </span>
+                                                      <ArrowRight size={14} className="text-neutral-300" />
+                                                      <span className="inline-flex items-center px-1.5 py-0.5 text-[11px] font-mono bg-primary-50 text-primary-700 border border-primary-200 rounded-sm font-medium">
+                                                        v{vc.newVersion}
+                                                      </span>
+                                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-sm">
+                                                        🔵 首次覆盖
+                                                      </span>
+                                                    </>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="px-4 py-3 bg-neutral-50 border-t border-neutral-100 flex items-center gap-6">
+                                    <span className="text-xs text-neutral-600">共 <span className="font-bold text-neutral-800">{versionStats.total}</span> 家门店</span>
+                                    <span className="text-xs text-neutral-600"><span className="font-bold text-success-700">{versionStats.upgraded}</span> 家版本升级</span>
+                                    <span className="text-xs text-neutral-600"><span className="font-bold text-blue-700">{versionStats.firstTime}</span> 家首次覆盖</span>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>

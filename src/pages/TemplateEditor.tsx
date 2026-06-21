@@ -140,6 +140,30 @@ export default function TemplateEditor() {
     return getTemplateActivityLogs(templateId);
   }, [templateId, getTemplateActivityLogs]);
 
+  const versionGroupedLogs = useMemo(() => {
+    const groups: { version: string; logs: typeof historyLogs; isCurrent: boolean }[] = [];
+    const versionMap = new Map<string, typeof historyLogs>();
+    historyLogs.forEach(log => {
+      const ver = log.version || '未知版本';
+      if (!versionMap.has(ver)) {
+        versionMap.set(ver, []);
+      }
+      versionMap.get(ver)!.push(log);
+    });
+    versionMap.forEach((logs, ver) => {
+      const isCurrent = currentVersion ? ver === currentVersion.version : false;
+      groups.push({ version: ver, logs, isCurrent });
+    });
+    groups.sort((a, b) => {
+      if (a.isCurrent) return -1;
+      if (b.isCurrent) return 1;
+      const aTime = a.logs[0]?.timestamp || '';
+      const bTime = b.logs[0]?.timestamp || '';
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
+    return groups;
+  }, [historyLogs, currentVersion]);
+
   const handleLogClick = (log: any) => {
     if (log.reviewId) {
       navigate(`/reviews/${log.reviewId}`);
@@ -545,7 +569,7 @@ export default function TemplateEditor() {
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-primary-500" />
                 <span className="text-sm font-semibold text-neutral-700">版本历史</span>
-                <span className="text-[10px] text-neutral-400">({historyLogs.length})</span>
+                <span className="text-[10px] text-neutral-400">({versionGroupedLogs.length} 个版本)</span>
               </div>
               {showHistory ? (
                 <ChevronDown className="w-4 h-4 text-neutral-400" />
@@ -554,51 +578,83 @@ export default function TemplateEditor() {
               )}
             </button>
             {showHistory && (
-              <div className="px-4 pb-4 max-h-[320px] overflow-y-auto">
-                <div className="relative pl-3">
-                  <div className="absolute left-[5px] top-1 bottom-1 w-px bg-neutral-200" />
-                  {historyLogs.length === 0 ? (
-                    <div className="text-[11px] text-neutral-400 py-2 text-center">
-                      暂无历史记录
-                    </div>
-                  ) : (
-                    historyLogs.map((log) => {
-                      const isClickable = log.reviewId || log.deployId || log.detailUrl;
-                      return (
-                        <div
-                          key={log.id}
-                          onClick={() => isClickable && handleLogClick(log)}
-                          className={cn(
-                            'relative pb-3 last:pb-0 transition-colors rounded-r-sm',
-                            isClickable && 'cursor-pointer hover:bg-neutral-50 -ml-3 pl-3 mr-1'
-                          )}
-                          title={formatDateTime(log.timestamp)}
-                        >
-                          <div className={cn(
-                            'absolute -left-[7px] top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white z-10',
-                            dotColorMap[log.type] || 'bg-neutral-400'
-                          )} />
-                          <div className="pl-2">
-                            <div className="text-[11px] font-medium text-neutral-700 flex items-center justify-between">
-                              <span className="truncate">{log.typeLabel}</span>
-                              <span className="text-[10px] text-neutral-400 flex-shrink-0 ml-2">
-                                {formatDate(log.timestamp)}
-                              </span>
-                            </div>
-                            <div className="text-[10px] text-neutral-400 mt-0.5 truncate">
-                              {log.operatorName}
-                            </div>
-                            {log.description && (
-                              <div className="text-[10px] text-neutral-500 mt-0.5 line-clamp-2">
-                                {log.description}
+              <div className="px-4 pb-4 max-h-[400px] overflow-y-auto">
+                {versionGroupedLogs.length === 0 ? (
+                  <div className="text-[11px] text-neutral-400 py-2 text-center">
+                    暂无历史记录
+                  </div>
+                ) : (
+                  versionGroupedLogs.map((group) => (
+                    <div key={group.version} className="mb-3 last:mb-0">
+                      <div
+                        className={cn(
+                          'flex items-center gap-2 mb-2 px-2 py-1.5 rounded-sm text-xs font-semibold',
+                          group.isCurrent
+                            ? 'bg-primary-50 text-primary-700 border border-primary-200'
+                            : 'bg-neutral-50 text-neutral-600 border border-neutral-200'
+                        )}
+                      >
+                        <span className="font-mono">V{group.version}</span>
+                        {group.isCurrent && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-primary-100 text-primary-600 rounded-sm">
+                            当前编辑
+                          </span>
+                        )}
+                        {group.logs.some(l => l.reviewId) && (
+                          <button
+                            onClick={() => {
+                              const logWithReview = group.logs.find(l => l.reviewId);
+                              if (logWithReview?.reviewId) {
+                                navigate(`/reviews/${logWithReview.reviewId}`);
+                              }
+                            }}
+                            className="ml-auto text-[10px] text-primary-500 hover:text-primary-700 hover:underline"
+                          >
+                            查看审核详情
+                          </button>
+                        )}
+                      </div>
+                      <div className="relative pl-3">
+                        <div className="absolute left-[5px] top-1 bottom-1 w-px bg-neutral-200" />
+                        {group.logs.map((log) => {
+                          const isClickable = log.reviewId || log.deployId || log.detailUrl;
+                          return (
+                            <div
+                              key={log.id}
+                              onClick={() => isClickable && handleLogClick(log)}
+                              className={cn(
+                                'relative pb-3 last:pb-0 transition-colors rounded-r-sm',
+                                isClickable && 'cursor-pointer hover:bg-neutral-50 -ml-3 pl-3 mr-1'
+                              )}
+                              title={formatDateTime(log.timestamp)}
+                            >
+                              <div className={cn(
+                                'absolute -left-[7px] top-0.5 w-2.5 h-2.5 rounded-full border-2 border-white z-10',
+                                dotColorMap[log.type] || 'bg-neutral-400'
+                              )} />
+                              <div className="pl-2">
+                                <div className="text-[11px] font-medium text-neutral-700 flex items-center justify-between">
+                                  <span className="truncate">{log.typeLabel}</span>
+                                  <span className="text-[10px] text-neutral-400 flex-shrink-0 ml-2">
+                                    {formatDate(log.timestamp)}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-neutral-400 mt-0.5 truncate">
+                                  {log.operatorName}
+                                </div>
+                                {log.description && (
+                                  <div className="text-[10px] text-neutral-500 mt-0.5 line-clamp-2">
+                                    {log.description}
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>

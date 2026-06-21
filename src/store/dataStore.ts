@@ -90,6 +90,32 @@ export interface TraceExportItem {
   riskTerms: string[];
 }
 
+export type ReviewChecklistSourceType = 'rejected_review' | 'replaced_deploy' | 'complaint_signature' | 'high_risk_term';
+
+export interface ReviewChecklistItem {
+  id: string;
+  sourceType: ReviewChecklistSourceType;
+  sourceId: string;
+  sourceLabel: string;
+  description: string;
+  templateId?: string;
+  templateName?: string;
+  storeName?: string;
+  addedAt: string;
+  status: 'pending' | 'in_progress' | 'resolved';
+  statusLabel: string;
+  note: string;
+}
+
+export interface BatchStoreVersionChange {
+  storeId: string;
+  storeName: string;
+  city: string;
+  oldVersion: string | null;
+  newVersion: string;
+  changed: boolean;
+}
+
 function hashSignatureId(id: string): number {
   let hash = 0;
   for (let i = 0; i < id.length; i++) {
@@ -151,6 +177,7 @@ interface DataState {
   deploys: DeployRecordExtended[];
   signatures: SignatureRecord[];
   templateActivityLogs: TemplateActivityLog[];
+  reviewChecklist: ReviewChecklistItem[];
   riskTermStats: RiskTermStats[];
   resignStats: ReSignStats[];
   complaintAssociations: ComplaintAssociation[];
@@ -196,17 +223,21 @@ interface DataState {
 
   getReviewActivityLogs: (reviewId: string) => TemplateActivityLog[];
 
+  getReviewChainLogs: (reviewId: string) => TemplateActivityLog[];
+
   getDeployById: (id: string) => DeployRecordExtended | undefined;
 
   getDeployBatches: (templateId?: string) => DeployRecordExtended[];
 
   getDeploysByTemplateId: (templateId: string) => DeployRecordExtended[];
 
+  getBatchVersionChanges: (deployId: string) => BatchStoreVersionChange[];
+
   getComplaintSignatures: () => SignatureRecord[];
 
-  getSignaturesByParagraphId: (paragraphId: string, templateId?: string) => SignatureRecord[];
+  getSignaturesByParagraphId: (paragraphId: string, templateId?: string, versionId?: string) => SignatureRecord[];
 
-  getSignaturesByTemplateId: (templateId: string) => SignatureRecord[];
+  getSignaturesByTemplateId: (templateId: string, versionId?: string) => SignatureRecord[];
 
   getSignaturesByStoreId: (storeId: string) => SignatureRecord[];
 
@@ -216,11 +247,20 @@ interface DataState {
 
   getRecentReplacedDeploys: (days?: number) => DeployRecordExtended[];
 
+  addToChecklist: (item: Omit<ReviewChecklistItem, 'id' | 'addedAt' | 'status' | 'statusLabel' | 'note'>) => void;
+
+  removeFromChecklist: (itemId: string) => void;
+
+  updateChecklistItem: (itemId: string, updates: Partial<Pick<ReviewChecklistItem, 'status' | 'note'>>) => void;
+
+  getChecklistItems: (filters?: { sourceType?: ReviewChecklistSourceType; status?: string }) => ReviewChecklistItem[];
+
   exportTraceList: (filters?: {
     templateId?: string;
     storeId?: string;
     hasComplaint?: boolean;
     highRiskOnly?: boolean;
+    includeChecklist?: boolean;
   }) => TraceExportItem[];
 
   resetToInitial: () => void;
@@ -364,6 +404,7 @@ export const useDataStore = create<DataState>()(
       deploys: JSON.parse(JSON.stringify(initDeploysExtended)),
       signatures: JSON.parse(JSON.stringify(initSignatures)),
       templateActivityLogs: JSON.parse(JSON.stringify(initActivityLogs)),
+      reviewChecklist: [],
       riskTermStats: initRiskTermStats,
       resignStats: initResignStats,
       complaintAssociations: initComplaintAssociations,
@@ -636,6 +677,23 @@ export const useDataStore = create<DataState>()(
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       },
 
+      getReviewChainLogs: (reviewId) => {
+        const review = get().reviews.find(r => r.id === reviewId);
+        if (!review) return [];
+        const logs = get().templateActivityLogs
+          .filter(log => {
+            if (log.templateId !== review.templateId) return false;
+            if (log.versionId && log.versionId !== review.versionId) return false;
+            if (log.reviewId === reviewId) return true;
+            if (log.type === 'draft_saved' || log.type === 'deployed' || log.type === 'withdrawn' || log.type === 'replaced') return true;
+            if (log.type === 'submitted' && !log.reviewId) return false;
+            if (log.reviewId && log.reviewId !== reviewId) return false;
+            return log.versionId === review.versionId;
+          })
+          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        return logs;
+      },
+
       getDeployById: (id) => {
         return get().deploys.find(d => d.id === id);
       },
@@ -658,18 +716,25 @@ export const useDataStore = create<DataState>()(
         return get().signatures.filter(s => signatureHasComplaint(s.id));
       },
 
-      getSignaturesByParagraphId: (paragraphId, templateId) => {
-        const result = get().signatures.filter(s =>
+      getSignaturesByParagraphId: (paragraphId, templateId, versionId) => {
+        let result = get().signatures.filter(s =>
           s.paragraphReadings.some(p => p.paragraphId === paragraphId)
         );
         if (templateId) {
-          return result.filter(s => s.templateId === templateId);
+          result = result.filter(s => s.templateId === templateId);
+        }
+        if (versionId) {
+          result = result.filter(s => s.templateVersionId === versionId);
         }
         return result;
       },
 
-      getSignaturesByTemplateId: (templateId) => {
-        return get().signatures.filter(s => s.templateId === templateId);
+      getSignaturesByTemplateId: (templateId, versionId) => {
+        let result = get().signatures.filter(s => s.templateId === templateId);
+        if (versionId) {
+          result = result.filter(s => s.templateVersionId === versionId);
+        }
+        return result;
       },
 
       getSignaturesByStoreId: (storeId) => {
@@ -707,6 +772,77 @@ export const useDataStore = create<DataState>()(
           .sort((a, b) => new Date(b.replacedAt || '').getTime() - new Date(a.replacedAt || '').getTime());
       },
 
+      getBatchVersionChanges: (deployId) => {
+        const state = get();
+        const deploy = state.deploys.find(d => d.id === deployId);
+        if (!deploy) return [];
+        const newStoreIds = new Set(deploy.storeIds || []);
+        const replacedDeploys = state.deploys.filter(d =>
+          deploy.replacedDeployIds.includes(d.id)
+        );
+        const oldStoreVersionMap = new Map<string, string>();
+        replacedDeploys.forEach(rd => {
+          (rd.storeIds || []).forEach(sid => {
+            if (newStoreIds.has(sid)) {
+              oldStoreVersionMap.set(sid, rd.version);
+            }
+          });
+        });
+        return (deploy.storeIds || []).map(sid => {
+          const store = state.stores.find(s => s.id === sid);
+          const oldVersion = oldStoreVersionMap.get(sid) || null;
+          return {
+            storeId: sid,
+            storeName: store?.name || sid,
+            city: store?.city || '',
+            oldVersion,
+            newVersion: deploy.version,
+            changed: oldVersion !== null,
+          };
+        }).sort((a, b) => a.city.localeCompare(b.city));
+      },
+
+      addToChecklist: (item) => {
+        const newItem: ReviewChecklistItem = {
+          ...item,
+          id: generateId('cl'),
+          addedAt: new Date().toISOString(),
+          status: 'pending',
+          statusLabel: '待处理',
+          note: '',
+        };
+        set(state => ({
+          reviewChecklist: [newItem, ...state.reviewChecklist],
+        }));
+      },
+
+      removeFromChecklist: (itemId) => {
+        set(state => ({
+          reviewChecklist: state.reviewChecklist.filter(i => i.id !== itemId),
+        }));
+      },
+
+      updateChecklistItem: (itemId, updates) => {
+        set(state => ({
+          reviewChecklist: state.reviewChecklist.map(i => {
+            if (i.id !== itemId) return i;
+            const statusLabel = updates.status === 'in_progress' ? '处理中' :
+              updates.status === 'resolved' ? '已处理' : i.statusLabel;
+            return { ...i, ...updates, statusLabel };
+          }),
+        }));
+      },
+
+      getChecklistItems: (filters) => {
+        const items = get().reviewChecklist;
+        if (!filters) return items;
+        return items.filter(i => {
+          if (filters.sourceType && i.sourceType !== filters.sourceType) return false;
+          if (filters.status && i.status !== filters.status) return false;
+          return true;
+        });
+      },
+
       exportTraceList: (filters) => {
         let list = get().signatures;
         if (filters?.templateId) {
@@ -723,7 +859,7 @@ export const useDataStore = create<DataState>()(
             s.paragraphReadings.some(p => p.duration > 60)
           );
         }
-        return list.map(s => ({
+        let result = list.map(s => ({
           signatureId: s.id,
           customerName: s.customerName,
           projectName: s.projectName,
@@ -738,6 +874,22 @@ export const useDataStore = create<DataState>()(
             .slice(0, 3)
             .map(p => p.paragraphTitle),
         }));
+        if (filters?.includeChecklist) {
+          const checklist = get().reviewChecklist;
+          const checklistItems: TraceExportItem[] = checklist.map(ci => ({
+            signatureId: ci.id,
+            customerName: '',
+            projectName: '',
+            templateName: ci.templateName || '',
+            templateVersion: '',
+            storeName: ci.storeName || '',
+            signedAt: ci.addedAt,
+            hasComplaint: ci.sourceType === 'complaint_signature',
+            riskTerms: [ci.sourceLabel],
+          }));
+          result = [...checklistItems, ...result];
+        }
+        return result;
       },
 
       resetToInitial: () => {
@@ -760,8 +912,9 @@ export const useDataStore = create<DataState>()(
         deploys: state.deploys,
         signatures: state.signatures,
         templateActivityLogs: state.templateActivityLogs,
+        reviewChecklist: state.reviewChecklist,
       }),
-      version: 3,
+      version: 4,
     }
   )
 );

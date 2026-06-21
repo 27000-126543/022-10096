@@ -140,8 +140,7 @@ export default function ReviewDetail() {
   const reviews = useDataStore(s => s.reviews);
   const templates = useDataStore(s => s.templates);
   const processReview = useDataStore(s => s.processReview);
-  const getReviewActivityLogs = useDataStore(s => s.getReviewActivityLogs);
-  const getTemplateActivityLogs = useDataStore(s => s.getTemplateActivityLogs);
+  const getReviewChainLogs = useDataStore(s => s.getReviewChainLogs);
 
   const review = reviews.find(r => r.id === id) || reviews[0];
   const template = templates.find(t => t.id === review?.templateId);
@@ -171,10 +170,10 @@ export default function ReviewDetail() {
   const activeParagraph = paragraphDiffs.find((p) => p.paragraphId === activeTab);
   const isPending = review?.status === 'pending';
 
-  const fullLogs = useMemo(() => {
-    if (!template) return [];
-    return getTemplateActivityLogs(template.id);
-  }, [template, getTemplateActivityLogs]);
+  const chainLogs = useMemo(() => {
+    if (!id) return [];
+    return getReviewChainLogs(id);
+  }, [id, getReviewChainLogs]);
 
   const handleLogClick = (log: any) => {
     if (log.reviewId) {
@@ -510,14 +509,20 @@ export default function ReviewDetail() {
           <div className="flex-1 overflow-y-auto py-3">
             <div className="relative pl-4">
               <div className="absolute left-[7px] top-1 bottom-1 w-px bg-neutral-200" />
-              {fullLogs.length === 0 ? (
+              {chainLogs.length === 0 ? (
                 <div className="text-xs text-neutral-400 py-4 text-center">
                   暂无流水记录
                 </div>
               ) : (
-                fullLogs.map((log) => {
+                chainLogs.map((log) => {
                   const isCurrentReview = log.reviewId === id;
                   const isClickable = log.reviewId || log.deployId || log.detailUrl;
+                  let displayDescription = log.description;
+                  if (log.type === 'submitted' && log.reviewId === id && review) {
+                    displayDescription = review.changeSummary;
+                  } else if ((log.type === 'approved' || log.type === 'rejected') && log.reviewId === id && review) {
+                    displayDescription = review.opinion || log.description;
+                  }
                   return (
                     <div
                       key={log.id}
@@ -543,9 +548,9 @@ export default function ReviewDetail() {
                         <div className="text-[11px] text-neutral-400">
                           操作人：{log.operatorName}
                         </div>
-                        {log.description && (
+                        {displayDescription && (
                           <div className="text-[11px] text-neutral-500 mt-1 leading-relaxed whitespace-pre-wrap">
-                            {log.description}
+                            {displayDescription}
                           </div>
                         )}
                       </div>

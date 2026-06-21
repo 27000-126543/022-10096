@@ -21,6 +21,9 @@ import {
   FileSearch,
   X,
   ExternalLink,
+  ClipboardList,
+  BookmarkPlus,
+  Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DataTable } from '@/components/ui/DataTable';
@@ -30,6 +33,8 @@ import {
   signatureHasComplaint,
   getComplaintDetail,
   DeployRecordExtended,
+  ReviewChecklistItem,
+  ReviewChecklistSourceType,
 } from '@/store/dataStore';
 import {
   riskTermStats,
@@ -40,7 +45,7 @@ import {
   SignatureRecord,
 } from '@/data/localMock';
 
-type TabType = 'rejected' | 'replaced' | 'complaint' | 'riskTerms';
+type TabType = 'rejected' | 'replaced' | 'complaint' | 'riskTerms' | 'checklist';
 
 function formatDate(isoStr: string): string {
   const d = new Date(isoStr);
@@ -59,12 +64,17 @@ export default function LegalReview() {
   const [templateFilter, setTemplateFilter] = useState<string>('all');
   const [storeFilter, setStoreFilter] = useState<string>('all');
   const [timeRange, setTimeRange] = useState<number>(7);
+  const [includeChecklist, setIncludeChecklist] = useState(false);
 
   const summary = useDataStore((s) => s.getLegalReviewSummary());
   const getRejectedReviews = useDataStore((s) => s.getRejectedReviews);
   const getRecentReplacedDeploys = useDataStore((s) => s.getRecentReplacedDeploys);
   const getComplaintSignatures = useDataStore((s) => s.getComplaintSignatures);
   const exportTraceList = useDataStore((s) => s.exportTraceList);
+  const addToChecklist = useDataStore((s) => s.addToChecklist);
+  const removeFromChecklist = useDataStore((s) => s.removeFromChecklist);
+  const updateChecklistItem = useDataStore((s) => s.updateChecklistItem);
+  const reviewChecklist = useDataStore((s) => s.reviewChecklist);
 
   const kpiData = useMemo(() => {
     return [
@@ -129,14 +139,20 @@ export default function LegalReview() {
     const data = exportTraceList({
       templateId: templateFilter !== 'all' ? templateFilter : undefined,
       storeId: storeFilter !== 'all' ? storeFilter : undefined,
+      includeChecklist,
     });
 
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
+    const headers = ['签署ID', '顾客姓名', '项目', '模板', '版本', '门店', '签署时间', '是否涉诉', '风险条款'];
+    if (includeChecklist) {
+      headers.push('来源类型', '处理状态', '备注');
+    }
+
     const csvContent = [
-      ['签署ID', '顾客姓名', '项目', '模板', '版本', '门店', '签署时间', '是否涉诉', '风险条款'].join(','),
-      ...data.map((item) =>
-        [
+      headers.join(','),
+      ...data.map((item) => {
+        const row = [
           item.signatureId,
           item.customerName,
           item.projectName,
@@ -146,8 +162,17 @@ export default function LegalReview() {
           item.signedAt,
           item.hasComplaint ? '是' : '否',
           '"' + item.riskTerms.join('; ') + '"',
-        ].join(',')
-      ),
+        ];
+        if (includeChecklist) {
+          const matched = reviewChecklist.find(ci => ci.id === item.signatureId);
+          row.push(
+            matched ? matched.sourceLabel : '',
+            matched ? matched.statusLabel : '',
+            matched ? `"${matched.note}"` : ''
+          );
+        }
+        return row.join(',');
+      }),
     ].join('\n');
 
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -164,6 +189,7 @@ export default function LegalReview() {
     { key: 'replaced' as const, label: '发布替换', icon: RefreshCw, count: summary.replacedDeploys7d },
     { key: 'complaint' as const, label: '涉诉档案', icon: AlertTriangle, count: summary.complaintSignatures },
     { key: 'riskTerms' as const, label: '高风险条款', icon: ShieldAlert, count: summary.highRiskTerms },
+    { key: 'checklist' as const, label: '复盘清单', icon: ClipboardList, count: reviewChecklist.length },
   ];
 
   return (
@@ -175,7 +201,16 @@ export default function LegalReview() {
             整合视图，快速定位合规风险，辅助法务专员高效决策
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <label className="inline-flex items-center gap-1.5 text-xs text-neutral-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeChecklist}
+              onChange={(e) => setIncludeChecklist(e.target.checked)}
+              className="w-3.5 h-3.5 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+            />
+            包含复盘清单
+          </label>
           <button
             onClick={handleExport}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm text-white bg-primary-500 hover:bg-primary-600 rounded-sm transition-colors shadow-sm"
@@ -316,6 +351,7 @@ export default function LegalReview() {
         {activeTab === 'replaced' && <ReplacedTab days={timeRange || undefined} />}
         {activeTab === 'complaint' && <ComplaintTab />}
         {activeTab === 'riskTerms' && <RiskTermsTab />}
+        {activeTab === 'checklist' && <ChecklistTab />}
       </div>
     </div>
   );
@@ -324,6 +360,8 @@ export default function LegalReview() {
 function RejectedTab({ days }: { days?: number }) {
   const navigate = useNavigate();
   const getRejectedReviews = useDataStore((s) => s.getRejectedReviews);
+  const addToChecklist = useDataStore((s) => s.addToChecklist);
+  const reviewChecklist = useDataStore((s) => s.reviewChecklist);
 
   const rejectedReviews = useMemo(() => {
     return getRejectedReviews(days);
@@ -391,22 +429,49 @@ function RejectedTab({ days }: { days?: number }) {
     {
       key: 'action',
       title: '操作',
-      width: '120px',
+      width: '180px',
       align: 'center' as const,
-      render: (row: ReviewRecord) => (
-        <div className="flex items-center justify-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/reviews/${row.id}`);
-            }}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200 rounded-sm transition-colors"
-          >
-            <Eye size={11} />
-            查看详情
-          </button>
-        </div>
-      ),
+      render: (row: ReviewRecord) => {
+        const alreadyAdded = reviewChecklist.some(i => i.sourceId === row.id && i.sourceType === 'rejected_review');
+        return (
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/reviews/${row.id}`);
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200 rounded-sm transition-colors"
+            >
+              <Eye size={11} />
+              查看详情
+            </button>
+            {alreadyAdded ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-neutral-400 bg-neutral-50 border border-neutral-200 rounded-sm cursor-not-allowed">
+                <BookmarkPlus size={11} />
+                已加入
+              </span>
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  addToChecklist({
+                    sourceType: 'rejected_review',
+                    sourceId: row.id,
+                    sourceLabel: `审核驳回：${row.templateName} v${row.version}`,
+                    description: row.opinion || '审核驳回',
+                    templateId: row.templateId,
+                    templateName: row.templateName,
+                  });
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-warning-700 hover:text-warning-800 hover:bg-warning-50 border border-warning-200 rounded-sm transition-colors"
+              >
+                <BookmarkPlus size={11} />
+                加入复盘
+              </button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -435,6 +500,8 @@ function RejectedTab({ days }: { days?: number }) {
 
 function ReplacedTab({ days }: { days?: number }) {
   const getRecentReplacedDeploys = useDataStore((s) => s.getRecentReplacedDeploys);
+  const addToChecklist = useDataStore((s) => s.addToChecklist);
+  const reviewChecklist = useDataStore((s) => s.reviewChecklist);
   const [expandedDeployId, setExpandedDeployId] = useState<string | null>(null);
 
   const replacedDeploys = useMemo(() => {
@@ -513,36 +580,63 @@ function ReplacedTab({ days }: { days?: number }) {
     {
       key: 'action',
       title: '操作',
-      width: '120px',
+      width: '180px',
       align: 'center' as const,
-      render: (row: DeployRecordExtended) => (
-        <div className="flex items-center justify-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleExpand(row.id);
-            }}
-            className={cn(
-              'inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-sm transition-colors',
-              expandedDeployId === row.id
-                ? 'bg-primary-100 text-primary-700 border border-primary-300'
-                : 'text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200'
-            )}
-          >
-            {expandedDeployId === row.id ? (
-              <>
-                <ChevronDown size={11} />
-                收起
-              </>
+      render: (row: DeployRecordExtended) => {
+        const alreadyAdded = reviewChecklist.some(i => i.sourceId === row.id && i.sourceType === 'replaced_deploy');
+        return (
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleExpand(row.id);
+              }}
+              className={cn(
+                'inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-sm transition-colors',
+                expandedDeployId === row.id
+                  ? 'bg-primary-100 text-primary-700 border border-primary-300'
+                  : 'text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200'
+              )}
+            >
+              {expandedDeployId === row.id ? (
+                <>
+                  <ChevronDown size={11} />
+                  收起
+                </>
+              ) : (
+                <>
+                  <Eye size={11} />
+                  查看详情
+                </>
+              )}
+            </button>
+            {alreadyAdded ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-neutral-400 bg-neutral-50 border border-neutral-200 rounded-sm cursor-not-allowed">
+                <BookmarkPlus size={11} />
+                已加入
+              </span>
             ) : (
-              <>
-                <Eye size={11} />
-                查看详情
-              </>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  addToChecklist({
+                    sourceType: 'replaced_deploy',
+                    sourceId: row.id,
+                    sourceLabel: `版本替换：${row.templateName} v${row.version}`,
+                    description: `替换了 ${row.replacedDeployIds.length} 个旧版本`,
+                    templateId: row.templateId,
+                    templateName: row.templateName,
+                  });
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-warning-700 hover:text-warning-800 hover:bg-warning-50 border border-warning-200 rounded-sm transition-colors"
+              >
+                <BookmarkPlus size={11} />
+                加入复盘
+              </button>
             )}
-          </button>
-        </div>
-      ),
+          </div>
+        );
+      },
     },
   ];
 
@@ -649,6 +743,8 @@ function ReplacedTab({ days }: { days?: number }) {
 function ComplaintTab() {
   const navigate = useNavigate();
   const getComplaintSignatures = useDataStore((s) => s.getComplaintSignatures);
+  const addToChecklist = useDataStore((s) => s.addToChecklist);
+  const reviewChecklist = useDataStore((s) => s.reviewChecklist);
 
   const complaintSignatures = useMemo(() => {
     return getComplaintSignatures();
@@ -751,22 +847,50 @@ function ComplaintTab() {
     {
       key: 'action',
       title: '操作',
-      width: '120px',
+      width: '180px',
       align: 'center' as const,
-      render: (row: SignatureRecord) => (
-        <div className="flex items-center justify-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/signatures/${row.id}`);
-            }}
-            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200 rounded-sm transition-colors"
-          >
-            <Eye size={11} />
-            查看详情
-          </button>
-        </div>
-      ),
+      render: (row: SignatureRecord) => {
+        const alreadyAdded = reviewChecklist.some(i => i.sourceId === row.id && i.sourceType === 'complaint_signature');
+        return (
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/signatures/${row.id}`);
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200 rounded-sm transition-colors"
+            >
+              <Eye size={11} />
+              查看详情
+            </button>
+            {alreadyAdded ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-neutral-400 bg-neutral-50 border border-neutral-200 rounded-sm cursor-not-allowed">
+                <BookmarkPlus size={11} />
+                已加入
+              </span>
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  addToChecklist({
+                    sourceType: 'complaint_signature',
+                    sourceId: row.id,
+                    sourceLabel: `涉诉档案：${row.customerName} - ${row.projectName}`,
+                    description: '涉诉签署记录',
+                    templateId: row.templateId,
+                    templateName: row.templateName,
+                    storeName: row.storeName,
+                  });
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-warning-700 hover:text-warning-800 hover:bg-warning-50 border border-warning-200 rounded-sm transition-colors"
+              >
+                <BookmarkPlus size={11} />
+                加入复盘
+              </button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -798,6 +922,8 @@ function RiskTermsTab() {
   const navigate = useNavigate();
   const [expandedTermId, setExpandedTermId] = useState<string | null>(null);
   const getSignaturesByParagraphId = useDataStore((s) => s.getSignaturesByParagraphId);
+  const addToChecklist = useDataStore((s) => s.addToChecklist);
+  const reviewChecklist = useDataStore((s) => s.reviewChecklist);
 
   const topRiskTerms = useMemo(() => {
     return [...riskTermStats]
@@ -923,36 +1049,63 @@ function RiskTermsTab() {
     {
       key: 'action',
       title: '操作',
-      width: '140px',
+      width: '180px',
       align: 'center' as const,
-      render: (row: RiskTermStats) => (
-        <div className="flex items-center justify-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleExpand(row.paragraphId);
-            }}
-            className={cn(
-              'inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-sm transition-colors',
-              expandedTermId === row.paragraphId
-                ? 'bg-primary-100 text-primary-700 border border-primary-300'
-                : 'text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200'
-            )}
-          >
-            {expandedTermId === row.paragraphId ? (
-              <>
-                <ChevronDown size={11} />
-                收起
-              </>
+      render: (row: RiskTermStats) => {
+        const alreadyAdded = reviewChecklist.some(i => i.sourceId === row.paragraphId && i.sourceType === 'high_risk_term');
+        return (
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleExpand(row.paragraphId);
+              }}
+              className={cn(
+                'inline-flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-sm transition-colors',
+                expandedTermId === row.paragraphId
+                  ? 'bg-primary-100 text-primary-700 border border-primary-300'
+                  : 'text-primary-600 hover:text-primary-700 hover:bg-primary-50 border border-primary-200'
+              )}
+            >
+              {expandedTermId === row.paragraphId ? (
+                <>
+                  <ChevronDown size={11} />
+                  收起
+                </>
+              ) : (
+                <>
+                  <Eye size={11} />
+                  查看关联签署
+                </>
+              )}
+            </button>
+            {alreadyAdded ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-neutral-400 bg-neutral-50 border border-neutral-200 rounded-sm cursor-not-allowed">
+                <BookmarkPlus size={11} />
+                已加入
+              </span>
             ) : (
-              <>
-                <Eye size={11} />
-                查看关联签署
-              </>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  addToChecklist({
+                    sourceType: 'high_risk_term',
+                    sourceId: row.paragraphId,
+                    sourceLabel: `高风险条款：${row.paragraphTitle}`,
+                    description: `平均停留 ${row.avgDuration}s，签署 ${row.signatureCount} 次`,
+                    templateId: row.templateId,
+                    templateName: row.templateName,
+                  });
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-warning-700 hover:text-warning-800 hover:bg-warning-50 border border-warning-200 rounded-sm transition-colors"
+              >
+                <BookmarkPlus size={11} />
+                加入复盘
+              </button>
             )}
-          </button>
-        </div>
-      ),
+          </div>
+        );
+      },
     },
   ];
 
@@ -1120,6 +1273,236 @@ function RiskTermsTab() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+const sourceTypeConfig: Record<ReviewChecklistSourceType, { label: string; className: string }> = {
+  rejected_review: { label: '审核驳回', className: 'bg-danger-50 text-danger-700 border-danger-200' },
+  replaced_deploy: { label: '发布替换', className: 'bg-warning-50 text-warning-700 border-warning-200' },
+  complaint_signature: { label: '涉诉档案', className: 'bg-red-50 text-red-800 border-red-200' },
+  high_risk_term: { label: '高风险条款', className: 'bg-purple-50 text-purple-700 border-purple-200' },
+};
+
+const statusConfig: Record<string, { label: string; className: string; dotClassName: string }> = {
+  pending: { label: '待处理', className: 'bg-warning-50 text-warning-700 border-warning-200', dotClassName: 'bg-warning-500' },
+  in_progress: { label: '处理中', className: 'bg-primary-50 text-primary-700 border-primary-200', dotClassName: 'bg-primary-500' },
+  resolved: { label: '已处理', className: 'bg-success-50 text-success-700 border-success-200', dotClassName: 'bg-success-500' },
+};
+
+function ChecklistTab() {
+  const reviewChecklist = useDataStore((s) => s.reviewChecklist);
+  const removeFromChecklist = useDataStore((s) => s.removeFromChecklist);
+  const updateChecklistItem = useDataStore((s) => s.updateChecklistItem);
+
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  const filteredItems = useMemo(() => {
+    return reviewChecklist.filter(item => {
+      if (sourceTypeFilter !== 'all' && item.sourceType !== sourceTypeFilter) return false;
+      if (statusFilter !== 'all' && item.status !== statusFilter) return false;
+      return true;
+    });
+  }, [reviewChecklist, sourceTypeFilter, statusFilter]);
+
+  const stats = useMemo(() => ({
+    total: reviewChecklist.length,
+    pending: reviewChecklist.filter(i => i.status === 'pending').length,
+    inProgress: reviewChecklist.filter(i => i.status === 'in_progress').length,
+    resolved: reviewChecklist.filter(i => i.status === 'resolved').length,
+  }), [reviewChecklist]);
+
+  const handleRemove = (itemId: string) => {
+    if (window.confirm('确定要移除该复盘项吗？')) {
+      removeFromChecklist(itemId);
+    }
+  };
+
+  const columns = [
+    {
+      key: 'sourceType',
+      title: '来源类型',
+      width: '120px',
+      align: 'center' as const,
+      render: (row: ReviewChecklistItem) => {
+        const config = sourceTypeConfig[row.sourceType];
+        return (
+          <span className={cn('inline-flex items-center px-2 py-0.5 text-[11px] font-medium border rounded-sm', config.className)}>
+            {config.label}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'sourceLabel',
+      title: '来源描述',
+      width: '220px',
+      render: (row: ReviewChecklistItem) => (
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-neutral-800 truncate" title={row.sourceLabel}>
+            {row.sourceLabel}
+          </p>
+          <p className="text-xs text-neutral-500 truncate" title={row.description}>
+            {row.description}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: 'templateName',
+      title: '模板名称',
+      width: '160px',
+      render: (row: ReviewChecklistItem) => (
+        <div className="flex items-center gap-1.5 min-w-0">
+          <FileText size={12} className="text-primary-500 flex-shrink-0" />
+          <span className="text-xs text-neutral-700 truncate">{row.templateName || '-'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'storeName',
+      title: '门店',
+      width: '120px',
+      render: (row: ReviewChecklistItem) => (
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Store size={11} className="text-primary-500 flex-shrink-0" />
+          <span className="text-xs text-neutral-700 truncate">{row.storeName || '-'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'addedAt',
+      title: '加入时间',
+      width: '140px',
+      align: 'center' as const,
+      render: (row: ReviewChecklistItem) => (
+        <div className="flex items-center justify-center gap-1">
+          <Clock size={12} className="text-neutral-400" />
+          <span className="text-xs text-neutral-600">{formatDate(row.addedAt)}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      title: '处理状态',
+      width: '110px',
+      align: 'center' as const,
+      render: (row: ReviewChecklistItem) => {
+        const config = statusConfig[row.status];
+        return (
+          <select
+            value={row.status}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              e.stopPropagation();
+              updateChecklistItem(row.id, { status: e.target.value as ReviewChecklistItem['status'] });
+            }}
+            className={cn(
+              'text-[11px] font-medium border rounded-sm px-1.5 py-0.5 appearance-none cursor-pointer focus:outline-none',
+              config.className
+            )}
+          >
+            <option value="pending">待处理</option>
+            <option value="in_progress">处理中</option>
+            <option value="resolved">已处理</option>
+          </select>
+        );
+      },
+    },
+    {
+      key: 'note',
+      title: '备注',
+      width: '150px',
+      render: (row: ReviewChecklistItem) => (
+        <input
+          type="text"
+          defaultValue={row.note}
+          onBlur={(e) => {
+            updateChecklistItem(row.id, { note: e.target.value });
+          }}
+          onClick={(e) => e.stopPropagation()}
+          placeholder="添加备注..."
+          className="w-full text-xs border border-neutral-200 rounded-sm px-2 py-1 text-neutral-700 bg-white focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200"
+        />
+      ),
+    },
+    {
+      key: 'action',
+      title: '操作',
+      width: '80px',
+      align: 'center' as const,
+      render: (row: ReviewChecklistItem) => (
+        <div className="flex items-center justify-center">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRemove(row.id);
+            }}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-danger-600 hover:text-danger-700 hover:bg-danger-50 border border-danger-200 rounded-sm transition-colors"
+          >
+            <Trash2 size={11} />
+            移除
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <ClipboardList size={16} className="text-primary-600" />
+          <h3 className="text-sm font-semibold text-neutral-800">复盘清单</h3>
+        </div>
+        <div className="flex items-center gap-3 text-[11px]">
+          <span className="text-neutral-500">共 <span className="font-medium text-neutral-800">{stats.total}</span> 项</span>
+          <span className="text-neutral-300">|</span>
+          <span className="text-warning-700">待处理 {stats.pending}</span>
+          <span className="text-primary-700">处理中 {stats.inProgress}</span>
+          <span className="text-success-700">已处理 {stats.resolved}</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-neutral-500">来源类型：</label>
+          <select
+            value={sourceTypeFilter}
+            onChange={(e) => setSourceTypeFilter(e.target.value)}
+            className="text-xs border border-neutral-300 rounded-sm px-2 py-1.5 bg-white text-neutral-700 focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200"
+          >
+            <option value="all">全部</option>
+            <option value="rejected_review">审核驳回</option>
+            <option value="replaced_deploy">发布替换</option>
+            <option value="complaint_signature">涉诉档案</option>
+            <option value="high_risk_term">高风险条款</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-neutral-500">处理状态：</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="text-xs border border-neutral-300 rounded-sm px-2 py-1.5 bg-white text-neutral-700 focus:outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200"
+          >
+            <option value="all">全部</option>
+            <option value="pending">待处理</option>
+            <option value="in_progress">处理中</option>
+            <option value="resolved">已处理</option>
+          </select>
+        </div>
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={filteredItems}
+        rowKey="id"
+        pageSize={10}
+        stripe
+        emptyText="暂无复盘清单项，可从其他Tab加入"
+      />
     </div>
   );
 }

@@ -50,6 +50,7 @@ export default function SignatureList() {
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedComplaint, setSelectedComplaint] = useState<string>('all');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('all');
+  const [selectedVersionId, setSelectedVersionId] = useState<string>('');
   const [paragraphId, setParagraphId] = useState<string>('');
   const [searchText, setSearchText] = useState('');
   const [showExportDropdown, setShowExportDropdown] = useState(false);
@@ -63,12 +64,14 @@ export default function SignatureList() {
     const paraId = searchParams.get('paragraphId');
     const complaint = searchParams.get('complaint');
     const storeId = searchParams.get('storeId');
+    const verId = searchParams.get('versionId');
 
     if (tplId) setSelectedTemplateId(tplId);
     if (paraId) setParagraphId(paraId);
     if (complaint === '1') setSelectedComplaint('complaint');
     if (complaint === '0') setSelectedComplaint('normal');
     if (storeId) setSelectedStores([storeId]);
+    if (verId) setSelectedVersionId(verId);
 
     setIsInitialized(true);
   }, []);
@@ -82,6 +85,9 @@ export default function SignatureList() {
     }
     if (paragraphId) {
       params.set('paragraphId', paragraphId);
+    }
+    if (selectedVersionId) {
+      params.set('versionId', selectedVersionId);
     }
     if (selectedComplaint === 'complaint') {
       params.set('complaint', '1');
@@ -98,7 +104,7 @@ export default function SignatureList() {
     } else {
       setSearchParams({}, { replace: false });
     }
-  }, [selectedTemplateId, paragraphId, selectedComplaint, selectedStores, isInitialized]);
+  }, [selectedTemplateId, paragraphId, selectedVersionId, selectedComplaint, selectedStores, isInitialized]);
 
   const categoryList = useMemo(() => {
     const cats = new Map<string, string>();
@@ -119,6 +125,15 @@ export default function SignatureList() {
     }
     return '';
   }, [paragraphId, signatures]);
+
+  const versionLabel = useMemo(() => {
+    if (!selectedVersionId) return '';
+    const tpl = templates.find(t =>
+      t.versions.some(v => v.id === selectedVersionId)
+    );
+    const ver = tpl?.versions.find(v => v.id === selectedVersionId);
+    return ver ? `V${ver.version}` : selectedVersionId;
+  }, [selectedVersionId, templates]);
 
   const filteredData = useMemo(() => {
     let result = [...signatures];
@@ -156,6 +171,9 @@ export default function SignatureList() {
     }
     if (paragraphId) {
       result = result.filter((r) => r.paragraphReadings.some(p => p.paragraphId === paragraphId));
+    }
+    if (selectedVersionId) {
+      result = result.filter((r) => r.templateVersionId === selectedVersionId);
     }
     if (searchText.trim()) {
       const search = searchText.toLowerCase();
@@ -207,6 +225,7 @@ export default function SignatureList() {
     selectedStatus,
     selectedComplaint,
     paragraphId,
+    selectedVersionId,
     searchText,
     sortField,
     sortOrder,
@@ -514,6 +533,24 @@ export default function SignatureList() {
           </div>
           <button
             onClick={() => setParagraphId('')}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-600 hover:text-neutral-800 hover:bg-white rounded-sm transition-colors"
+          >
+            <X size={12} />
+            清除筛选
+          </button>
+        </div>
+      )}
+
+      {selectedVersionId && versionLabel && (
+        <div className="mb-4 bg-primary-50 border border-primary-200 rounded-sm p-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText size={14} className="text-primary-600" />
+            <span className="text-sm text-neutral-700">
+              当前筛选：模板版本 <span className="font-semibold text-primary-700">{versionLabel}</span> 的签署，共 <span className="font-bold text-primary-700">{filteredData.length}</span> 条
+            </span>
+          </div>
+          <button
+            onClick={() => setSelectedVersionId('')}
             className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-600 hover:text-neutral-800 hover:bg-white rounded-sm transition-colors"
           >
             <X size={12} />

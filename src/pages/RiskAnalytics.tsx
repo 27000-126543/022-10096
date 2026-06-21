@@ -320,11 +320,22 @@ function DwellAnalysisTab() {
   }, [selectedTemplateId]);
 
   const expandedTerm = topRiskData.find(t => t.paragraphId === expandedParagraphId);
+  const expandedVersionInfo = useMemo(() => {
+    if (!expandedTerm) return { versionId: undefined, versionLabel: '' };
+    const tpl = templates.find(t => t.id === expandedTerm.templateId);
+    const versionId = tpl?.currentVersionId;
+    const version = tpl?.versions.find(v => v.id === versionId);
+    return { versionId, versionLabel: version ? `v${version.version}` : '' };
+  }, [expandedTerm, templates]);
+
   const relatedSignatures = useMemo(() => {
     if (!expandedParagraphId) return [];
-    const tplId = selectedTemplateId !== 'all' ? selectedTemplateId : undefined;
-    return getSignaturesByParagraphId(expandedParagraphId, tplId);
-  }, [expandedParagraphId, selectedTemplateId, getSignaturesByParagraphId]);
+    const term = riskTermStats.find(t => t.paragraphId === expandedParagraphId);
+    const tplId = term?.templateId;
+    const template = tplId ? templates.find(t => t.id === tplId) : undefined;
+    const versionId = template?.currentVersionId;
+    return getSignaturesByParagraphId(expandedParagraphId, tplId, versionId);
+  }, [expandedParagraphId, templates, getSignaturesByParagraphId]);
 
   const signatureStats = useMemo(() => {
     if (relatedSignatures.length === 0) {
@@ -658,7 +669,7 @@ function DwellAnalysisTab() {
                   「{expandedTerm.paragraphTitle}」关联签署记录
                 </h4>
                 <p className="text-xs text-neutral-500 mt-0.5">
-                  模板：{expandedTerm.templateName}
+                  模板：{expandedTerm.templateName}{expandedVersionInfo.versionLabel ? ` · 版本：${expandedVersionInfo.versionLabel}` : ''}
                 </p>
               </div>
             </div>
@@ -805,11 +816,14 @@ function DwellAnalysisTab() {
             <button
               onClick={() => {
                 const params = new URLSearchParams();
-                if (selectedTemplateId !== 'all') {
-                  params.set('templateId', selectedTemplateId);
+                if (expandedTerm?.templateId) {
+                  params.set('templateId', expandedTerm.templateId);
                 }
                 if (expandedParagraphId) {
                   params.set('paragraphId', expandedParagraphId);
+                }
+                if (expandedVersionInfo.versionId) {
+                  params.set('versionId', expandedVersionInfo.versionId);
                 }
                 navigate(`/signatures?${params.toString()}`);
               }}
